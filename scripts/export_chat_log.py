@@ -102,7 +102,7 @@ def format_content(content: str | list[dict[str, Any]], tool_results: dict[str, 
             summary = summarize_tool_use(block.get("name", ""), block.get("input", {}))
             detail = f"<details><summary>{summary}</summary>\n\n```json\n{json.dumps(block.get('input', {}), indent=2)}\n```"
             result = tool_results.get(block.get("id"))
-            if result is not None:
+            if result is not None and block.get("name") != "Read":
                 result_text = result if isinstance(result, str) else json.dumps(result, indent=2)
                 detail += f"\n\n**Result**\n```\n{result_text}\n```"
             parts.append(detail + "\n</details>")
