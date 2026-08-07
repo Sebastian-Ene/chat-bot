@@ -127,7 +127,7 @@ def render(events: list[Event]) -> str:
         if not body.strip():
             continue  # e.g. a user turn that was only a tool_result, or thinking-only assistant turn
         ts = entry.get("timestamp", "")
-        time_label = ts.split("T")[1].rstrip("Z") if "T" in ts else ts
+        time_label = ts.split("T")[1].rstrip("Z")[:5] if "T" in ts else ts
         role = message.get("role", entry.get("type", "?"))
         if sections and sections[-1][0] == role:
             sections[-1][2] += "\n\n" + body
