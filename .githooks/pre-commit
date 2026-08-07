@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Exports the Claude Code chat log since the previous commit into chat-logs/
+# and stages it, so every commit ships with the transcript that produced it.
+#
+# This file is tracked for reference/setup; the hook that actually runs
+# lives at .git/hooks/pre-commit (git hooks are never tracked by git). To
+# (re)install it in a fresh clone:
+#   cp .githooks/pre-commit .git/hooks/pre-commit
+#   chmod +x .git/hooks/pre-commit
+set -e
+cd "$(git rev-parse --show-toplevel)"
+python3 scripts/export_chat_log.py
