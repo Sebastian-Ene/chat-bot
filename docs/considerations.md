@@ -1,0 +1,1 @@
+Just a POC. Did not consider making the ai logging necessary work for another dev or other ai tools than Claude.

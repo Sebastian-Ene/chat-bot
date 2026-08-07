@@ -4,8 +4,10 @@
 Run by the pre-commit git hook (see .githooks/pre-commit). Reads the raw
 session JSONL files that Claude Code writes under ~/.claude/projects/<slug>/,
 keeps everything newer than the previous commit's timestamp, and writes a
-single markdown file per commit with the full raw detail (text, thinking,
-tool calls, tool results).
+single markdown file per commit. Pure session bookkeeping (mode changes,
+snapshots, tool-listing deltas) is dropped; user/assistant text renders as a
+readable transcript, and tool calls/results are kept in full but folded into
+collapsible <details> blocks so they don't bury the conversation.
 """
 import json
 import subprocess
@@ -23,17 +25,21 @@ def project_slug(path: Path) -> str:
     return str(path).replace("/", "-")
 
 
-def last_commit_time() -> str | None:
+def parse_iso(ts: str) -> datetime:
+    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+
+def last_commit_time() -> datetime | None:
     result = subprocess.run(
         ["git", "log", "-1", "--format=%cI"],
         cwd=REPO_ROOT, capture_output=True, text=True,
     )
     if result.returncode != 0 or not result.stdout.strip():
         return None
-    return result.stdout.strip()
+    return parse_iso(result.stdout.strip())
 
 
-def load_events(project_dir: Path, since: str | None) -> list[Event]:
+def load_events(project_dir: Path, since: datetime | None) -> list[Event]:
     events: list[Event] = []
     if not project_dir.is_dir():
         return events
@@ -48,9 +54,7 @@ def load_events(project_dir: Path, since: str | None) -> list[Event]:
                 except json.JSONDecodeError:
                     continue
                 ts = entry.get("timestamp")
-                if not ts:
-                    continue
-                if since and ts <= since:
+                if not ts or (since and parse_iso(ts) <= since):
                     continue
                 entry["_source_file"] = jsonl_file.name
                 events.append(entry)
@@ -58,7 +62,33 @@ def load_events(project_dir: Path, since: str | None) -> list[Event]:
     return events
 
 
-def format_content(content: str | list[dict[str, Any]]) -> str:
+def truncate(text: str, limit: int = 80) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+def summarize_tool_use(name: str, tool_input: dict[str, Any]) -> str:
+    for key in ("command", "file_path", "pattern", "query", "description", "prompt"):
+        if key in tool_input:
+            return f"tool_use: {name} — {truncate(str(tool_input[key]))}"
+    return f"tool_use: {name}"
+
+
+def collect_tool_results(events: list[Event]) -> dict[str, Any]:
+    """Map tool_use_id -> raw result content, so results can render under the
+    assistant's tool_use instead of the user turn the API delivers them in."""
+    results: dict[str, Any] = {}
+    for entry in events:
+        content = (entry.get("message") or {}).get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if block.get("type") == "tool_result" and block.get("tool_use_id"):
+                results[block["tool_use_id"]] = block.get("content", "")
+    return results
+
+
+def format_content(content: str | list[dict[str, Any]], tool_results: dict[str, Any]) -> str:
     if isinstance(content, str):
         return content
     parts: list[str] = []
@@ -67,34 +97,48 @@ def format_content(content: str | list[dict[str, Any]]) -> str:
         if btype == "text":
             parts.append(block.get("text", ""))
         elif btype == "thinking":
-            parts.append(f"_(thinking)_\n{block.get('thinking', '')}")
+            continue  # skip assistant thinking blocks
         elif btype == "tool_use":
-            parts.append(
-                f"**Tool call: `{block.get('name')}`**\n```json\n"
-                f"{json.dumps(block.get('input', {}), indent=2)}\n```"
-            )
+            summary = summarize_tool_use(block.get("name", ""), block.get("input", {}))
+            detail = f"<details><summary>{summary}</summary>\n\n```json\n{json.dumps(block.get('input', {}), indent=2)}\n```"
+            result = tool_results.get(block.get("id"))
+            if result is not None:
+                result_text = result if isinstance(result, str) else json.dumps(result, indent=2)
+                detail += f"\n\n**Result**\n```\n{result_text}\n```"
+            parts.append(detail + "\n</details>")
         elif btype == "tool_result":
-            inner = block.get("content", "")
-            inner_text = inner if isinstance(inner, str) else json.dumps(inner, indent=2)
-            parts.append(f"**Tool result**\n```\n{inner_text}\n```")
+            continue  # rendered inline with its tool_use above, not as a user turn
         else:
             parts.append(f"```json\n{json.dumps(block, indent=2)}\n```")
     return "\n\n".join(parts)
 
 
 def render(events: list[Event]) -> str:
-    lines: list[str] = []
+    tool_results = collect_tool_results(events)
+
+    # (role, time_label, body) per non-empty turn; consecutive turns with the
+    # same role (e.g. a run of assistant tool calls) collapse into one section.
+    sections: list[list[str]] = []
     for entry in events:
-        ts = entry.get("timestamp", "")
-        etype = entry.get("type", "?")
         message = entry.get("message")
-        lines.append(f"## [{ts}] {etype}")
-        if message:
-            role = message.get("role", etype)
-            lines.append(f"**{role}**\n")
-            lines.append(format_content(message.get("content", "")))
+        if not message:
+            continue  # drop pure session bookkeeping (mode, snapshots, deltas)
+        body = format_content(message.get("content", ""), tool_results)
+        if not body.strip():
+            continue  # e.g. a user turn that was only a tool_result, or thinking-only assistant turn
+        ts = entry.get("timestamp", "")
+        time_label = ts.split("T")[1].rstrip("Z") if "T" in ts else ts
+        role = message.get("role", entry.get("type", "?"))
+        if sections and sections[-1][0] == role:
+            sections[-1][2] += "\n\n" + body
         else:
-            lines.append(f"```json\n{json.dumps(entry, indent=2)}\n```")
+            sections.append([role, time_label, body])
+
+    lines: list[str] = []
+    for role, time_label, body in sections:
+        lines.append(f"## {role} — {time_label}")
+        lines.append("")
+        lines.append(body)
         lines.append("")
     return "\n".join(lines)
 
@@ -113,7 +157,6 @@ def main() -> None:
     header = (
         f"# Claude Code chat log\n\n"
         f"Exported: {now}\n"
-        f"Range: {since or 'beginning'} .. {now}\n\n"
     )
     out_path.write_text(header + render(events))
 
