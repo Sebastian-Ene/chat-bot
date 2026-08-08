@@ -1,5 +1,11 @@
 Just a POC. Did not consider making the ai logging necessary work for another dev or other ai tools than Claude.
 
+Known limitation: `scripts/export_chat_log.py` (+ `.githooks/pre-commit`) only
+captures Claude Code sessions. It satisfies this PoC's own AI-usage
+transparency requirement (requirements.md §9), but it is not a general
+multi-tool/multi-dev trace capture — another dev, or a different AI
+assistant, would need separate tooling.
+
 Diagram:
 
 Nginx/AWS load balancer ->((server docker): uvicorn -> fastapi app )-> ( (db docker) vector db)
@@ -19,7 +25,7 @@ To install and run locally:
     uv sync --group dev                      # installs pytest, pytest-playwright
     uv run playwright install chromium       # downloads the Chromium browser binary
     sudo uv run playwright install-deps chromium   # installs required OS shared libs (needs interactive sudo)
-    uv run pytest tests/e2e -v
+    uv run pytest -m e2e -v
 
 The `install-deps` step needs interactive sudo (apt-get under the hood), so
 it can't be run non-interactively/by an agent — a human has to run it once

@@ -34,12 +34,21 @@ hooks) that's more likely to change:
 
 ```bash
 uv run playwright install chromium   # one-time; --with-deps needs interactive sudo, skip it here
-uv run pytest tests/e2e
+uv run pytest -m e2e
 ```
 
 `tests/conftest.py` provides a session-scoped `live_server` fixture that runs
 `app.main:app` via `uvicorn` in a background thread on a free local port and
 yields the base URL — use it in any e2e test that needs a running server.
+
+**Always run e2e tests as their own invocation, never mixed with the
+anyio-marked unit/api suite in the same `pytest` process.** Playwright's
+session teardown closes the process-wide `asyncio.Runner`, which breaks any
+`anyio`-marked async test that runs afterward (`RuntimeError: Runner is
+closed`). `pyproject.toml` sets `addopts = "-m 'not e2e'"` so a plain `pytest`
+run already skips e2e tests by default — mark any new e2e test module with
+`pytestmark = pytest.mark.e2e` (see `tests/e2e/test_chat_page.py`) to keep it
+excluded from that default run.
 
 ## File location
 

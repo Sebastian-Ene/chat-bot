@@ -15,3 +15,7 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: browser-driven Playwright tests. Run separately (`uv run pytest -m e2e`) — mixing them with anyio-marked tests in the same process breaks anyio's asyncio runner.",
+]

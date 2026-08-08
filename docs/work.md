@@ -8,15 +8,17 @@
 
 ## Backend
 - ~~Create b-e with Python (FastAPI, chosen for async performance)~~
-- Mock RAG/LLM responses (fake retrieval + fake streamed completion) so the API contract exists before real RAG is wired in
-- Chat endpoint(s) serving the mocked responses, streamed
+- ~~Mock RAG/LLM responses (fake retrieval + fake streamed completion) so the API contract exists before real RAG is wired in~~
+- ~~Chat endpoint(s) serving the mocked responses, streamed~~
+- ~~Validate the chat message field (non-blank, length bounds)~~
+- Decide: use conversation history for grounding/context? If so, likely means extending `POST /api/chat`'s request body to accept prior turns, not just the latest message — affects the RAG retrieval query and the prompt sent to the LLM
 - Logging / timings / metrics for performance
 - API key and secret management (no hardcoded credentials)
 - Document any additional security considerations
 
 ## Frontend
 - ~~Turn `app/templates/index.html` into an actual chat interface (plain HTML + vanilla JS, per requirements §5.5)~~
-- ~~JS chat widget consuming a streaming response (fetch-stream) — targets `/api/chat`, not built yet so replies show as an error bubble for now~~
+- ~~JS chat widget consuming a streaming response (fetch-stream) from `/api/chat`~~
 - ~~Fix accessible color contrast on chat bubbles~~
 - ~~Fix chat title scrolling out of view during long conversations~~
 - ~~Fix conversation log not scrolling to reveal the latest reply~~
@@ -54,6 +56,7 @@
 ## Testing
 - ~~Set up Playwright (`pytest-playwright`) e2e testing, with an accessible-role/text locator convention (`.claude/skills/e2e-testing/SKILL.md`)~~
 - ~~e2e tests: page loads with expected elements; title/input stay pinned on long conversations; log scrolls to reveal latest reply~~
+- ~~Unit tests for the mocked RAG functions (`retrieve`, `stream_completion`) and API tests for `POST /api/chat` (validation, streamed reply)~~
 - Single-prompt latency tests asserting completion under 5s
 - Lightweight concurrent-users test (a handful of simulated users) showing no unacceptable degradation
 - Decide: how to demonstrate/measure answer accuracy and reliability (golden Q&A set + eval? reasoned design only?)
@@ -63,4 +66,4 @@
 - Key design decisions and trade-offs
 - Chosen models, tools, and technologies
 - ~~Track prompts used during development~~ (`scripts/export_chat_log.py`)
-- Note the AI trace capture is Claude-Code-only, not a general multi-tool/multi-dev capture (known limitation, requirements §9)
+- ~~Note the AI trace capture is Claude-Code-only, not a general multi-tool/multi-dev capture (known limitation, requirements §9)~~ (`docs/considerations.md`)

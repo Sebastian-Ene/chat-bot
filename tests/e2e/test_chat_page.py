@@ -4,9 +4,12 @@ conversation grows.
 Locators use accessible roles/names and visible text, never ids or classes,
 so tests don't break when markup/styling is refactored.
 """
+import pytest
 from playwright.sync_api import Page, expect
 
 from tests.e2e.locators import chat_heading, conversation_log, message_input, send_button
+
+pytestmark = pytest.mark.e2e
 
 MAX_MESSAGES_TO_SEND = 20
 
