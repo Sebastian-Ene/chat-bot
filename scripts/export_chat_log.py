@@ -88,7 +88,27 @@ def collect_tool_results(events: list[Event]) -> dict[str, Any]:
     return results
 
 
-def format_content(content: str | list[dict[str, Any]], tool_results: dict[str, Any]) -> str:
+def collect_user_interactions(events: list[Event]) -> dict[str, str]:
+    """Map tool_use_id -> user feedback for tool calls the user stopped to weigh
+    in on (e.g. a permission rejection), so they can be flagged in the log."""
+    interactions: dict[str, str] = {}
+    for entry in events:
+        if not entry.get("toolDenialKind"):
+            continue
+        content = (entry.get("message") or {}).get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if block.get("type") == "tool_result" and block.get("tool_use_id"):
+                interactions[block["tool_use_id"]] = entry.get("userFeedback", "")
+    return interactions
+
+
+def format_content(
+    content: str | list[dict[str, Any]],
+    tool_results: dict[str, Any],
+    user_interactions: dict[str, str],
+) -> str:
     if isinstance(content, str):
         return content
     parts: list[str] = []
@@ -99,12 +119,18 @@ def format_content(content: str | list[dict[str, Any]], tool_results: dict[str, 
         elif btype == "thinking":
             continue  # skip assistant thinking blocks
         elif btype == "tool_use":
+            tool_id = block.get("id")
             summary = summarize_tool_use(block.get("name", ""), block.get("input", {}))
+            if tool_id in user_interactions:
+                summary = f"🛑 user interaction — {summary}"
             detail = f"<details><summary>{summary}</summary>\n\n```json\n{json.dumps(block.get('input', {}), indent=2)}\n```"
-            result = tool_results.get(block.get("id"))
+            result = tool_results.get(tool_id)
             if result is not None and block.get("name") != "Read":
                 result_text = result if isinstance(result, str) else json.dumps(result, indent=2)
                 detail += f"\n\n**Result**\n```\n{result_text}\n```"
+            feedback = user_interactions.get(tool_id)
+            if feedback:
+                detail += f"\n\n**User feedback**\n```\n{feedback}\n```"
             parts.append(detail + "\n</details>")
         elif btype == "tool_result":
             continue  # rendered inline with its tool_use above, not as a user turn
@@ -115,6 +141,7 @@ def format_content(content: str | list[dict[str, Any]], tool_results: dict[str, 
 
 def render(events: list[Event]) -> str:
     tool_results = collect_tool_results(events)
+    user_interactions = collect_user_interactions(events)
 
     # (role, time_label, body) per non-empty turn; consecutive turns with the
     # same role (e.g. a run of assistant tool calls) collapse into one section.
@@ -123,11 +150,11 @@ def render(events: list[Event]) -> str:
         message = entry.get("message")
         if not message:
             continue  # drop pure session bookkeeping (mode, snapshots, deltas)
-        body = format_content(message.get("content", ""), tool_results)
+        body = format_content(message.get("content", ""), tool_results, user_interactions)
         if not body.strip():
             continue  # e.g. a user turn that was only a tool_result, or thinking-only assistant turn
         ts = entry.get("timestamp", "")
-        time_label = ts.split("T")[1].rstrip("Z")[:5] if "T" in ts else ts
+        time_label = parse_iso(ts).astimezone().strftime("%H:%M") if ts else ts
         role = message.get("role", entry.get("type", "?"))
         if sections and sections[-1][0] == role:
             sections[-1][2] += "\n\n" + body
