@@ -2,9 +2,30 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>chat-bot</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}" />
+    <script src="{{ url_for('static', path='chat.js') }}" defer></script>
   </head>
   <body>
-    <h1>Hello, World!</h1>
+    <main class="chat">
+      <h1 class="chat-title">chat-bot</h1>
+
+      <div id="messages" class="messages" role="log" aria-live="polite" aria-label="Conversation"></div>
+
+      <form id="chat-form" class="chat-form">
+        <input
+          id="chat-input"
+          class="chat-input"
+          type="text"
+          name="message"
+          aria-label="Chat message"
+          placeholder="Ask a question…"
+          autocomplete="off"
+          required
+        />
+        <button type="submit" class="chat-send">Send</button>
+      </form>
+    </main>
   </body>
 </html>

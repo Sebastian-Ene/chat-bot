@@ -15,8 +15,11 @@
 - Document any additional security considerations
 
 ## Frontend
-- Turn `app/templates/index.html` into an actual chat interface (plain HTML + vanilla JS, per requirements §5.5)
-- JS chat widget consuming a streaming response (SSE or fetch-stream) from the mocked backend
+- ~~Turn `app/templates/index.html` into an actual chat interface (plain HTML + vanilla JS, per requirements §5.5)~~
+- ~~JS chat widget consuming a streaming response (fetch-stream) — targets `/api/chat`, not built yet so replies show as an error bubble for now~~
+- ~~Fix accessible color contrast on chat bubbles~~
+- ~~Fix chat title scrolling out of view during long conversations~~
+- ~~Fix conversation log not scrolling to reveal the latest reply~~
 
 ## Test document corpus
 - Generate 50 initial docs: PDF/DOCX/HTML mix, 1-25 pages each, unstructured text + mixed layouts + embedded tables/images, ~50/50 English/German, ~20% cross-lingual content overlap
@@ -49,6 +52,8 @@
 - Package the whole project as a single zip for delivery
 
 ## Testing
+- ~~Set up Playwright (`pytest-playwright`) e2e testing, with an accessible-role/text locator convention (`.claude/skills/e2e-testing/SKILL.md`)~~
+- ~~e2e tests: page loads with expected elements; title/input stay pinned on long conversations; log scrolls to reveal latest reply~~
 - Single-prompt latency tests asserting completion under 5s
 - Lightweight concurrent-users test (a handful of simulated users) showing no unacceptable degradation
 - Decide: how to demonstrate/measure answer accuracy and reliability (golden Q&A set + eval? reasoned design only?)

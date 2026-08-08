@@ -71,7 +71,7 @@
 - Must support streaming responses from the backend
 - Minimal/functional is sufficient — no visual polish required
 - **Decision:** plain HTML + vanilla JS, served by the existing FastAPI + Jinja2 setup (`app/templates/`). A small JS chat widget reads a streaming response (SSE or fetch-stream) from the backend. No build step, no separate frontend service/container — one backend container serves both API and UI, consistent with the "smooth install" architecture decision (§4). No framework (React/Vue/htmx) needed given the PoC doesn't require UI polish.
-- Current: `app/templates/index.html` is a placeholder page — needs to become the actual chat interface
+- **Implemented:** `app/templates/index.html` + `app/static/{style.css,chat.js}` — chat log, input, send button, streamed via `fetch`. `/api/chat` doesn't exist yet, so replies currently show an error bubble. Elements use explicit accessible names/roles (not ids/classes) for stable e2e targeting. Fixed post-implementation: dark-mode bubble contrast, title scrolling out of view on long conversations, and replies not scrolling into view — all covered by e2e tests (§7).
 
 ## 6. Non-Functional Requirements
 ### 6.1 Quality / Accuracy
@@ -90,6 +90,7 @@
 ## 7. Testing Strategy
 - No specific testing methodology is mandated by the brief — emphasis is on architectural reasoning over feature completeness, so this is our call
 - Open: how do we demonstrate "high accuracy" / "consistent behavior" — a small golden Q&A set + manual/LLM-judge eval, or is documented reasoning enough for a PoC?
+- **Implemented — UI e2e tests:** Playwright (`pytest-playwright`), `tests/e2e/`, run against the real app via a `live_server` fixture. Locators use accessible roles/names/text only, never ids/classes (see `.claude/skills/e2e-testing/SKILL.md`). Not baked into a dev Docker image — install/run steps documented in `docs/considerations.md`.
 - **Decision — performance testing:**
   - A test suite that issues single prompts and asserts each completes in under 5s, demonstrating the target constraint is met, not just assumed.
   - A lightweight concurrency test (a handful of concurrent simulated users) showing performance doesn't degrade unacceptably under light concurrent load — enough to back the "supports concurrent access" requirement with evidence, without a full load-testing setup (e.g. no locust/k6 needed).

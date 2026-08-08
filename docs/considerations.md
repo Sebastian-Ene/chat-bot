@@ -5,3 +5,23 @@ Diagram:
 Nginx/AWS load balancer ->((server docker): uvicorn -> fastapi app )-> ( (db docker) vector db)
 
 Use uvicorn + fastapi for speed (async)
+
+E2E testing (Playwright):
+
+Not baked into a dev Docker image — the browser + its system libs (libnspr4,
+libnss3, etc.) only matter for running e2e tests, not for running/reviewing
+the app itself, so it'd be dead weight in the main image for this PoC. If
+CI or multi-machine dev parity becomes a real need later, the right shape is
+a separate test-only Dockerfile/service, not bundling it into the app image.
+
+To install and run locally:
+
+    uv sync --group dev                      # installs pytest, pytest-playwright
+    uv run playwright install chromium       # downloads the Chromium browser binary
+    sudo uv run playwright install-deps chromium   # installs required OS shared libs (needs interactive sudo)
+    uv run pytest tests/e2e -v
+
+The `install-deps` step needs interactive sudo (apt-get under the hood), so
+it can't be run non-interactively/by an agent — a human has to run it once
+per machine. See `.claude/skills/e2e-testing/SKILL.md` for locator
+conventions used in these tests.
