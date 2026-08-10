@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic import SecretStr
@@ -21,6 +22,11 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr
     anthropic_model: str = "claude-haiku-4-5"
     qdrant_url: str = "http://localhost:6333"
+
+    # DEBUG by default: per-stage timings are only measured at this level, and
+    # this is a PoC whose latency breakdown is a deliverable.
+    log_level: str = "DEBUG"
+    log_dir: Path = Path("logs")
 
 
 @lru_cache

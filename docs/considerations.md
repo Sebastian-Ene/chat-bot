@@ -424,6 +424,34 @@ synchronous. Called directly from an async handler they block the event loop and
 the concurrency requirement quietly fails under load. They need a thread pool
 behind a bounded semaphore, or a separate process.
 
+### Logging — two streams, split by file
+
+Ordinary application logs and latency measurements answer different questions
+and have different audiences, so they are kept apart rather than interleaved:
+
+- `app` logger → **INFO**, console *and* `logs/app.log`. The things you would
+  track for any app: requests in, requests out.
+- `app.performance` logger → **DEBUG**, `logs/performance.log` only, with
+  `propagate = False` so timing noise never reaches the general log.
+
+`log_level` is a setting (`app/config.py`) and defaults to **DEBUG**, because
+the latency breakdown is a deliverable of this PoC rather than an optional
+extra.
+
+**Timings are only measured at DEBUG.** `create_timings()` returns a no-op
+collector when the performance logger is above DEBUG — one that makes no
+`perf_counter()` calls at all. The instrumentation is genuinely off rather than
+measured-and-discarded, so raising the log level in a latency-sensitive run
+costs nothing. Stage names are free-form, so the stages still to be built
+(rewrite, embed, search, expansion) need no change to the collector.
+
+**Console output is kept alongside the files** so `docker compose logs` stays
+useful. Writing logs to files inside a container would normally make them
+invisible and short-lived — **for dev the container is mounted against the
+working tree, so both files are written to disk on the host and remain
+accessible after the container exits.** A production deployment would ship
+stdout to a log collector instead of reading files off a volume.
+
 ## Security
 
 **Secrets via `.env`**, read into the OS environment and consumed from there. No

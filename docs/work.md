@@ -19,8 +19,9 @@
 - Query rewrite step: structured output returning a query string, run before retrieval
 - Retrieve on both original and rewritten query as separate `prefetch` branches, fused with RRF
 - Run CPU-bound models (embedder, vision model) in a thread pool behind a bounded semaphore
-- Record TTFT and total completion per request, plus per-stage timers (rewrite, embed, search, expansion, generation)
-- Produce a latency breakdown to present, not just pass/fail against 5s
+- ~~Record TTFT and total completion per request, plus per-stage timers~~ (`app/timings.py`) — retrieval and generation are timed; rewrite/embed/search/expansion get timed as they are built, no collector change needed
+- ~~Split logging: ordinary logs at INFO, timings at DEBUG, separate files~~ (`app/logging_config.py`)
+- Produce a latency breakdown to present, not just pass/fail against 5s — raw per-request breakdown lands in `logs/performance.log`; the presentable summary comes with the eval harness
 - ~~API key and secret management: `.env` → OS env, no credentials in source~~ (`app/config.py`)
 - ~~Add `.env` to `.gitignore` and commit a placeholder `.env.example`~~
 - Document any additional security considerations

@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
+from app.logging_config import configure_logging
 from app.routers import api, pages
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -14,6 +15,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     get_settings()  # fail fast on missing or invalid configuration
+    configure_logging()
     yield
 
 

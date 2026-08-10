@@ -1,10 +1,13 @@
 """Generation: stream a reply from Claude, grounded in retrieved context."""
+import logging
+
 from collections.abc import AsyncIterator
 from functools import lru_cache
 
 import anthropic
 
 from app.config import get_settings
+from app.logging_config import APP_LOGGER
 
 MAX_TOKENS = 1024
 
@@ -22,7 +25,7 @@ ERROR_REPLY = "Sorry — I could not reach the assistant just now. Please try ag
 # TODO: guardrails on user input — prompt-injection protection and role
 # separation (requirements.md §6.3). The delimiters below are structure, not a
 # guardrail.
-
+logger = logging.getLogger(APP_LOGGER)
 
 @lru_cache
 def _client() -> anthropic.AsyncAnthropic:
@@ -44,12 +47,14 @@ async def stream_completion(query: str, context: list[str]) -> AsyncIterator[str
     No thinking and a small `max_tokens`: the 5s budget in requirements.md §7.2
     leaves little room, and `output_config.effort` errors on Haiku 4.5.
     """
+    prompt = _build_prompt(query, context)
+    logger.debug(f"For query '{query}', with context '{context}', final prompt '{prompt}'")
     try:
         async with _client().messages.stream(
             model=get_settings().anthropic_model,
             max_tokens=MAX_TOKENS,
             system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": _build_prompt(query, context)}],
+            messages=[{"role": "user", "content": prompt}],
         ) as stream:
             async for text in stream.text_stream:
                 yield text
