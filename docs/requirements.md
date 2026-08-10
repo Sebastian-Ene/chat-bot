@@ -1,127 +1,277 @@
 # Requirements
 
-> Primary source: `docs/business-case.md` (the assignment brief). Supplemented by `docs/work.md` (own TODOs) and `docs/considerations.md` (own design notes). Fill in / correct as we go.
+> **What this document is.** The description of the project: what it is, what it
+> must do, and what it is built from. Written to be the single place a person or
+> an AI agent reads to get full context.
+>
+> **It records decisions, not reasoning.** For *why* a decision was made, which
+> alternatives were rejected, and what trade-offs were accepted, see
+> `docs/considerations.md`. For the task list, see `docs/work.md`. The
+> assignment brief itself is `docs/business-case.md`.
 
 ## 1. Overview
-- What: a PoC customer-support conversational AI chatbot (RAG) that answers questions grounded in provided documentation.
-- Context: this is a take-home assignment for an AI Solution Engineer interview. Deliverable is a single zip of the whole project; solution gets presented in a second interview.
-- Emphasis (per brief): code quality, architectural reasoning, AI system design, and clear/explainable decisions — **not** feature completeness or UI polish. It's explicitly a PoC, not a production system.
+
+A PoC customer-support conversational AI chatbot (RAG) that answers questions
+grounded in provided documentation.
+
+Context: a take-home assignment for an AI Solution Engineer interview. The
+deliverable is a single zip of the whole project, presented in a second
+interview.
+
+Emphasis, per the brief: code quality, architectural reasoning, AI system
+design, and clear explainable decisions — **not** feature completeness or UI
+polish. Explicitly a PoC, not a production system.
 
 ## 2. Goals & Non-Goals
-- Goals:
-  - Answer customer support questions grounded in the provided documentation (no hallucinated/off-KB answers)
-  - Ingest, process, and index docs (PDF, DOCX, HTML) into a local vector DB
-  - Support English and German content
-  - Demonstrate production-aware thinking (perf, security, observability) without needing to fully build it out
-- Non-goals:
-  - Full production system / full scalability
-  - Full user authentication
-  - Visual/UI polish
-  - Streamlit (explicitly disallowed as frontend tech)
-  - ai-usage logging tooling (`scripts/export_chat_log.py`) being reusable by other devs/tools — POC-only, Claude Code-specific (see `docs/considerations.md`)
 
-## 3. Scope
-- Languages: English and German
-- Document formats: PDF, DOCX, HTML
-- Document content: unstructured text, mixed layouts, embedded tables and images
-- **Decision — corpus size:** documents are 1-25 pages each. Start with an initial corpus of 50 docs; later add a batch of 5, then a batch of 10, on top of the already-indexed set. The staged additions exist specifically to demonstrate:
-  - incremental ingestion — adding new docs without re-processing the whole corpus
-  - re-ranking — retrieval quality/ranking behavior as the corpus grows
-- **Decision — design target:** even though the test corpus is small (65 docs total), the ingestion/indexing/retrieval design should be built to scale to much larger document volumes — this is for showcasing (production-aware thinking), not because the PoC itself needs that scale.
-- **Decision — test document generation:** we generate all 65 documents ourselves (not provided), covering the three required formats (PDF, DOCX, HTML), each containing a mix of images, tables, and embedded info to exercise document understanding. Split ~50/50 English/German, with ~20% of the content overlapping in meaning across the two languages (same information expressed in both) — to test cross-lingual retrieval/grounding, not just per-language handling.
+**Goals**
+- Answer support questions grounded in the documentation, with no off-corpus or hallucinated answers
+- Ingest, process and index PDF/DOCX/HTML into a local vector DB
+- Support English and German, including cross-lingual retrieval
+- Demonstrate production-aware thinking (performance, security, observability) without fully building it out
 
-## 4. Architecture
-- Required shape (per brief): a backend containing all AI/retrieval/orchestration logic, plus a frontend UI connected to it. Microservices allowed if they add clarity/value, not required.
-- Vector DB must be **local** (not a managed cloud service).
-- **Decision:** two containers via `docker-compose` — backend (uvicorn + FastAPI, serving the frontend too) and vector DB service — no load balancer. Priority is a smooth install for another dev: `docker compose up` should bring up the app with the vector DB already configured, no manual DB setup or Nginx layer needed. Drops the Nginx/LB from the original `docs/considerations.md` sketch as unnecessary for a PoC.
-- Current implementation: minimal FastAPI app (`app/main.py`, `app/routers/pages.py`) serving one server-rendered HTML page — placeholder, not yet the real chat UI/API.
-- Open: which local vector DB service to run in its own container (needs to be pick-and-justify anyway, see 5.2) — e.g. Qdrant or Weaviate ship an official Docker image, which is a factor in the choice.
+**Non-goals**
+- Full production system or real scalability
+- User authentication
+- Visual/UI polish
+- Streamlit (explicitly disallowed by the brief)
+- AI-usage logging that works for other devs or other AI tools — PoC-only, Claude Code specific
 
-## 5. Functional Requirements
-### 5.1 RAG — Read (ingestion)
-- Must ingest PDF, DOCX, HTML
-- Must handle unstructured text, mixed layouts, embedded tables and images
-- Document understanding technology is our choice (OCR, parsing, multimodal) — must be justified
-- Open: pick the parsing/extraction approach (e.g. per-format libraries vs. a unified multimodal parser) and justify it
+## 3. Stack
 
-### 5.2 RAG — Store
-- Vector DB: our choice, must be local — needs pick + justification
-- Embedding model: our choice — needs pick + justification
-- Chunking strategy: our choice — needs pick + justification
+| Layer | Choice |
+|---|---|
+| Backend | FastAPI + uvicorn (async) |
+| Frontend | Plain HTML + vanilla JS, Jinja2 templates, served by the backend |
+| Parsing | Docling, unified across PDF/DOCX/HTML, OCR enabled |
+| Image descriptions | Docling-extracted captions; vision model generates only where absent |
+| Chunking | Docling `HybridChunker`, BGE-M3 tokenizer, ~512 tokens |
+| Embeddings | BGE-M3, local (dense + sparse from one model) |
+| Vector DB | Qdrant, local container |
+| Retrieval | Hybrid dense + sparse, RRF fusion, neighbour expansion. No re-ranking |
+| LLM | Claude Haiku 4.5 (`claude-haiku-4-5`) |
+| Packaging | `docker-compose`: backend + Qdrant, built via `uv` |
 
-### 5.3 RAG — Generate
-- LLM for retrieval/generation: our choice — needs pick + justification
-- Integrate via API
-- Prompt guardrails (mandatory):
-  - Protection against prompt injection
-  - Clear system instructions and role separation
-  - Constraints to keep responses aligned with the provided knowledge base
-- Must deliver high accuracy, consistent/reliable behavior, predictable response quality
+**Query pipeline:**
 
-### 5.4 Backend
-- Contains all AI, retrieval, and orchestration logic (FastAPI, per own notes — justify choice)
-- Must support concurrent access (multiple simultaneous users)
-- Must implement measurements: logging, timing, metrics for performance
-- Must stream responses to the frontend
-- Target: a single completion should not exceed 5s under normal conditions (perfect optimization not required, but design should show performance awareness)
+    user message + history
+      → LLM query rewrite (structured output)
+      → embed (original + rewritten)
+      → Qdrant hybrid search (dense + sparse prefetch, RRF)
+      → neighbour expansion
+      → Claude generation with citations, streamed to the client
 
-### 5.5 Frontend
-- Any HTML-rendering technology allowed; **Streamlit is explicitly disallowed**
-- Must provide a simple chat interface
-- Must support streaming responses from the backend
-- Minimal/functional is sufficient — no visual polish required
-- **Decision:** plain HTML + vanilla JS, served by the existing FastAPI + Jinja2 setup (`app/templates/`). A small JS chat widget reads a streaming response (SSE or fetch-stream) from the backend. No build step, no separate frontend service/container — one backend container serves both API and UI, consistent with the "smooth install" architecture decision (§4). No framework (React/Vue/htmx) needed given the PoC doesn't require UI polish.
-- **Implemented:** `app/templates/index.html` + `app/static/{style.css,chat.js}` — chat log, input, send button, streamed via `fetch`. `/api/chat` doesn't exist yet, so replies currently show an error bubble. Elements use explicit accessible names/roles (not ids/classes) for stable e2e targeting. Fixed post-implementation: dark-mode bubble contrast, title scrolling out of view on long conversations, and replies not scrolling into view — all covered by e2e tests (§7).
+**Ingestion pipeline:**
 
-## 6. Non-Functional Requirements
-### 6.1 Quality / Accuracy
-- High answer accuracy, consistent/reliable behavior, predictable response quality (mandatory, no specific metric given)
+    document
+      → Docling parse (layout, tables, images, OCR)
+      → generate missing image captions, written back into the DoclingDocument
+      → HybridChunker
+      → contextualize()
+      → BGE-M3 embed (dense + sparse)
+      → Qdrant upsert
 
-### 6.2 Performance
+Order matters in ingestion: caption generation must precede chunking.
+
+## 4. Scope
+
+- **Languages:** English and German
+- **Formats:** PDF, DOCX, HTML
+- **Content:** unstructured text, mixed layouts, embedded tables and images
+
+### Corpus
+
+- 1–25 pages per document. 50 initial documents, then a batch of 5, then a batch
+  of 10, added on top of the already-indexed set to demonstrate incremental
+  ingestion
+- Generated by us, not provided. ~50/50 EN/DE, with ~20% of content expressed in
+  both languages to exercise cross-lingual retrieval
+- Digital-native — no scans. Scanned-document handling is a documented
+  limitation, not a supported case
+- **Deliberately hard**, to avoid the corpus becoming an exam we set ourselves:
+  - multi-column and mixed-layout pages
+  - tables spanning page breaks, and unruled tables as well as ruled
+  - charts and diagrams that exist **only as images**, with information found
+    nowhere in the surrounding text
+  - most figures with a visible caption; a deliberate portion with none, so the
+    generated-caption path is exercised
+  - documents long enough to stress chunking and section context
+
+### Design target
+
+The ingestion/indexing/retrieval design should scale well beyond 65 documents.
+That is for showcasing production-aware thinking, not because the PoC needs it.
+
+## 5. Architecture
+
+- Backend holds all AI, retrieval and orchestration logic; a frontend UI
+  connects to it (required shape, per brief)
+- Vector DB must be local, not a managed cloud service
+- **Two containers** via `docker-compose` — backend (uvicorn + FastAPI, also
+  serving the frontend) and Qdrant. No load balancer. `docker compose up` must
+  produce a working app with no manual DB setup
+- **Current state:** minimal FastAPI app (`app/main.py`, `app/routers/`) serving
+  the chat UI, with mocked retrieval and completion (`app/rag/`). Real RAG not
+  yet wired in
+
+## 6. Functional Requirements
+
+### 6.1 Ingestion
+
+- Must ingest PDF, DOCX and HTML containing unstructured text, mixed layouts,
+  tables and images
+- **Parser:** Docling, one unified parser for all three formats, producing a
+  structured document tree with page and section provenance
+- **OCR:** enabled — it reads text rendered *inside* images (chart axis labels,
+  legends, numbers in diagrams), which the captioner does not reliably transcribe
+- **Image descriptions:** use `PictureItem.captions` where Docling found a
+  visible caption; generate a description with a vision model only where absent.
+  Applies to all three formats. Accessibility metadata (HTML `alt`, DOCX
+  `descr`, PDF `/Alt`) is out of scope — Docling discards it
+  - captioner: Docling's default picture-description model to start
+  - generation runs as **our own pipeline stage**, because Docling's built-in
+    picture description covers PDF only
+  - record provenance (`extracted` / `generated`) per description
+  - cache generated captions by image hash
+- **Incremental ingestion:** adding documents must not reprocess the corpus.
+  Content-hash manifest per document; deterministic chunk IDs allow upserts
+
+### 6.2 Storage & Retrieval
+
+- **Chunking:** Docling `HybridChunker` with BGE-M3's tokenizer, `max_tokens`
+  ~512, table headers repeated on overflow. Embed `contextualize()` output
+  (heading path + captions); store raw text separately for display
+- **Embeddings:** BGE-M3, run locally, emitting dense and sparse vectors
+- **Vector DB:** Qdrant, hybrid search via the Query API (`prefetch` dense +
+  sparse, RRF fusion)
+  - point IDs must be unsigned ints or UUIDs — use `uuid5(doc_id, chunk_index)`
+  - unit tests use Qdrant's embedded mode, no Docker required
+- **Neighbour expansion:** retrieve on the chunk, send the chunk plus adjacent
+  siblings to the LLM. Fetch siblings by payload filter on (`doc_id`,
+  `chunk_index` range); merge overlapping windows; clamp to `parent_id`
+- **Re-ranking:** not in the initial build
+- **Chunk payload:** `doc_id`, `chunk_index`, `parent_id`, `page_no(s)`,
+  `heading_path`, `element_types`, `lang`, `source_format`, `caption_provenance`,
+  `doc_content_hash`
+
+### 6.3 Generation
+
+- LLM integrated via API — **Claude Haiku 4.5** (`claude-haiku-4-5`)
+- Responses use Claude's native **citations**, so answers carry verifiable
+  provenance back to source chunks
+- **Model API constraints on Haiku 4.5:**
+  - `output_config.effort` errors — not available as a latency dial
+  - thinking is `{"type": "enabled", "budget_tokens": N}` or `"disabled"`;
+    adaptive thinking is unavailable
+  - `temperature` is accepted (it 400s on Opus 5 / Sonnet 5)
+  - context window 200K
+  - prompt-cache minimum is 4096 tokens — caching can silently no-op below that
+- Model configuration must live in one place; upgrading is not a string swap
+- **Guardrails (mandatory):** injection protection, clear system instructions and
+  role separation, and constraints keeping answers within the knowledge base
+- **Guardrail scope: user input only.** Indexed documents are considered safe for
+  the PoC. In production they would be checked
+- Must deliver high accuracy, consistent behaviour and predictable response quality
+
+### 6.4 Backend
+
+- Holds all AI, retrieval and orchestration logic
+- **Conversation history is stateless** — the client sends prior turns; no
+  server-side session store
+  - the entire history is user input, including assistant turns, which a caller
+    can forge. Validation and guardrails apply to every turn
+  - cap turn count and total length
+- The LLM sees prior turns but **only the current turn's retrieved chunks**
+- Prompt order: system → history → retrieved documents → question
+- **Query rewriting runs on every request**, before retrieval, using structured
+  output. Retrieval runs on both the original and rewritten query as separate
+  `prefetch` branches, fused with RRF
+- Must support concurrent access, stream responses, and emit timing metrics
+
+### 6.5 Frontend
+
+- Any HTML-rendering technology; Streamlit disallowed. Simple chat interface,
+  streaming responses, minimal styling
+- **Implemented:** plain HTML + vanilla JS (`app/templates/index.html`,
+  `app/static/`), no build step, served by the backend. Elements use accessible
+  names and roles for stable e2e targeting
+
+## 7. Non-Functional Requirements
+
+### 7.1 Quality
+
+High answer accuracy, consistent and reliable behaviour, predictable response
+quality. No specific metric mandated by the brief.
+
+### 7.2 Performance
+
 - Concurrent multi-user access
-- Single completion ≤ 5s under normal conditions
-- Logging/timing/metrics required to demonstrate performance awareness
+- A single completion should not exceed 5s under normal conditions
+- **Both time-to-first-token and total completion are measured and presented.**
+  TTFT is not cheap here — the unconditional query rewrite means first token
+  only arrives after rewrite → embed → search → expansion → generation
+- **Per-stage timers** on rewrite, embed, search, neighbour expansion and
+  generation, so latency can be presented as a breakdown rather than a single
+  number
 
-### 6.3 Security
-- Full user authentication **not required**
-- Mandatory: proper API key and secret management, no hardcoded credentials in source
-- Any additional security measures taken should be documented
+### 7.3 Security
 
-## 7. Testing Strategy
-- No specific testing methodology is mandated by the brief — emphasis is on architectural reasoning over feature completeness, so this is our call
-- Open: how do we demonstrate "high accuracy" / "consistent behavior" — a small golden Q&A set + manual/LLM-judge eval, or is documented reasoning enough for a PoC?
-- **Implemented — UI e2e tests:** Playwright (`pytest-playwright`), `tests/e2e/`, run against the real app via a `live_server` fixture. Locators use accessible roles/names/text only, never ids/classes (see `.claude/skills/e2e-testing/SKILL.md`). Not baked into a dev Docker image — install/run steps documented in `docs/considerations.md`.
-- **Decision — performance testing:**
-  - A test suite that issues single prompts and asserts each completes in under 5s, demonstrating the target constraint is met, not just assumed.
-  - A lightweight concurrency test (a handful of concurrent simulated users) showing performance doesn't degrade unacceptably under light concurrent load — enough to back the "supports concurrent access" requirement with evidence, without a full load-testing setup (e.g. no locust/k6 needed).
+- Full authentication not required
+- No hardcoded credentials. **Secrets via `.env`**, read into the OS environment
+  and consumed from there. `.env` gitignored, `.env.example` committed
+- Guardrails apply to user input only (see §6.3)
 
-## 8. Deployment / Packaging
-- Final deliverable is a **single zip file** of the whole project — no live deployment target is required
-- **Decision:** ship a `docker-compose.yml` with a backend service (built from this repo) and a vector DB service, so another dev can run the whole thing with one command and no manual DB configuration. This is our own addition (`docs/work.md`) beyond the brief's minimum, chosen to demonstrate production-aware packaging and an easy reviewer experience.
-- `uv` is still used for local (non-Docker) dev — the Docker image should also build via `uv` for consistency.
+## 8. Testing
 
-## 9. Documentation & AI Usage Transparency (mandatory deliverables)
-- Architecture overview
-- Key design decisions and trade-offs
-- Chosen models, tools, and technologies
-- **Must use an AI assistant during implementation**, and must include:
-  - All prompts used during development
-  - Relevant LLM interaction traces that contributed to the final solution
-  - This is what `scripts/export_chat_log.py` + `.githooks/pre-commit` exist for — auto-exports Claude Code transcripts into `chat-logs/` per commit
-  - **Decision:** document this as a known limitation — the capture tooling only supports Claude Code sessions (per `docs/considerations.md`: "did not consider making the AI logging necessary work for another dev or other AI tools"), not a general multi-tool/multi-dev trace capture. Sufficient for this PoC's own AI usage transparency requirement; call it out explicitly rather than implying broader support.
+- No methodology mandated by the brief; this is our call
+- **Implemented — e2e:** Playwright (`pytest-playwright`) in `tests/e2e/`,
+  against the real app via a `live_server` fixture. Locators use accessible
+  roles/names/text only, never ids or classes. Not baked into the app image —
+  see `docs/considerations.md` for install and run steps
+- **Performance:** single-prompt latency tests asserting under 5s, plus a
+  lightweight concurrent-users test. No full load-testing harness
+- **Multi-turn is a nice-to-test, not a target.** The golden Q&A set is
+  single-turn; multi-turn cases only if time allows
 
-## 10. Open Questions
-- Which local vector DB to run in Docker (candidates should ship an official image, e.g. Qdrant/Chroma/Weaviate) — **deferred, TBD**
-- Parsing/extraction approach for PDF/DOCX/HTML with tables, images, mixed layout, bilingual content — **deferred, TBD**
-- Embedding model — **deferred, TBD**
-- Chunking strategy choice — **deferred, TBD**
-- LLM choice for generation/retrieval — **deferred, TBD**
-- How to demonstrate/measure accuracy and reliability — **deferred, TBD**
+## 9. Deployment / Packaging
 
-~~Architecture shape (LB vs. simplified)~~ — resolved: docker-compose with backend + vector DB containers, no LB (see §4).
-~~Docker vs. plain zip~~ — resolved: keep Docker for easy install, see §8.
-~~Frontend approach~~ — resolved: plain HTML + vanilla JS served by FastAPI, no separate frontend app (see §5.5).
-~~Claude-Code-only trace capture~~ — resolved: document as a known limitation, not a general capture tool (see §9).
-~~Expected document volume/corpus size~~ — resolved: 65 docs (50 initial + 5 + 10 staged), 1-25 pages each, designed to scale further for showcase (see §3).
-~~Source of the test documents~~ — resolved: we generate all 65 ourselves, PDF/DOCX/HTML mix with images/tables/embedded info, ~50/50 EN/DE with ~20% cross-lingual content overlap (see §3).
-~~Load testing scope~~ — resolved: single-prompt latency tests (assert <5s) plus a lightweight concurrent-users test, no full load-testing harness (see §7).
+- Deliverable is a **single zip** of the project; no live deployment target
+- `docker-compose.yml` with backend + Qdrant, so one command gives a working app
+  with no manual DB configuration
+- `uv` for local dev; the Docker image builds via `uv` for consistency
+
+## 10. Documentation & AI Usage Transparency
+
+Mandatory deliverables: architecture overview, key design decisions and
+trade-offs, and the chosen models/tools/technologies — all covered by
+`docs/considerations.md` alongside this document.
+
+An AI assistant must be used during implementation, and all prompts and relevant
+interaction traces must be included. `scripts/export_chat_log.py` +
+`.githooks/pre-commit` auto-export Claude Code transcripts into `chat-logs/` per
+commit. **Known limitation:** this captures Claude Code sessions only, not a
+general multi-tool or multi-dev trace capture.
+
+## 11. Open Questions
+
+- **How to demonstrate and measure accuracy and reliability.** This is the
+  trigger for four deferred decisions: whether re-ranking returns (§6.2),
+  whether the captioner needs upgrading (§6.1), whether Haiku 4.5 is sufficient
+  (§6.3), and whether BGE-M3 earns its size. It is also the detection mechanism
+  for the deferred Docling verification spikes, which fail silently rather than
+  with errors.
+- **Concurrency model.** The embedder and any local vision model are CPU-bound
+  and synchronous; called directly from an async handler they serialise
+  requests. Needs a thread pool with a bounded semaphore, or a separate process.
+
+### Resolved
+
+Architecture shape (no load balancer, §5) · Docker vs plain zip (§9) · frontend
+approach (§6.5) · Claude-Code-only trace capture (§10) · corpus size and source
+(§4) · load-testing scope (§8) · parsing approach (§6.1) · image descriptions
+(§6.1) · verification spikes deferred (§11 above) · embedding model (§6.2) ·
+vector DB (§6.2) · chunking and expansion strategy (§6.2) · re-ranking deferred
+(§6.2) · LLM choice (§6.3) · guardrail scope (§6.3) · secrets handling (§7.3) ·
+conversation history (§6.4) · latency metrics (§7.2)
+
+Rationale for each is in `docs/considerations.md`.
