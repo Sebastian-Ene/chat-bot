@@ -21,8 +21,8 @@
 - Run CPU-bound models (embedder, vision model) in a thread pool behind a bounded semaphore
 - Record TTFT and total completion per request, plus per-stage timers (rewrite, embed, search, expansion, generation)
 - Produce a latency breakdown to present, not just pass/fail against 5s
-- API key and secret management: `.env` → OS env, no credentials in source
-- Add `.env` to `.gitignore` and commit a placeholder `.env.example`
+- ~~API key and secret management: `.env` → OS env, no credentials in source~~ (`app/config.py`)
+- ~~Add `.env` to `.gitignore` and commit a placeholder `.env.example`~~
 - Document any additional security considerations
 
 ## Frontend
@@ -61,12 +61,14 @@
 - Use Qdrant's embedded mode (`:memory:` / local path) in unit tests
 
 ## RAG — Generate
-- Integrate the LLM via API, replacing the mocked responses
-- Keep model configuration in one place
-- Do not use `output_config.effort` — it errors on Haiku 4.5
-- Enable citations on the generation call; fall back to a canned reply when a response carries none
-- Assert `cache_read_input_tokens > 0` in a test
-- Implement prompt guardrails on user input:
+- ~~Integrate the LLM via API, replacing the mocked responses~~ (`app/rag/llm.py`)
+- ~~Keep model configuration in one place~~ (`app/config.py`)
+- ~~Do not use `output_config.effort` — it errors on Haiku 4.5~~
+- Assert `cache_read_input_tokens > 0` in a test — blocked: Haiku 4.5's prompt-cache
+  minimum is 4096 tokens, which the current prompt is nowhere near. Revisit once
+  real retrieved chunks push the prefix past it
+- Enable citations on the generation call; fall back to a canned reply when a response carries none (TODO in `app/rag/llm.py`)
+- Implement prompt guardrails on user input (TODO in `app/rag/llm.py`):
     - Protection against prompt injection
     - Clear system instructions and role separation
     - Constraints keeping responses aligned with the knowledge base

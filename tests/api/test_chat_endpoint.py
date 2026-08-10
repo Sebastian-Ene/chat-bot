@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from tests.fake_anthropic import STUBBED_REPLY
 
 client = TestClient(app)
 
@@ -10,7 +11,7 @@ def test_chat_returns_streamed_reply() -> None:
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
-    assert response.text.strip() == "This is a mocked response from the LLM."
+    assert response.text.strip() == STUBBED_REPLY
 
 
 def test_chat_rejects_missing_message() -> None:
