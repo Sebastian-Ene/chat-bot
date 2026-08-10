@@ -85,6 +85,17 @@ def test_conversation_keeps_succeeding_past_the_history_cap(page: Page, live_ser
     expect(page.get_by_text(STUBBED_REPLY, exact=True)).to_have_count(exchanges)
 
 
+def test_rejected_token_tells_the_user_to_reload(page: Page, live_server: str) -> None:
+    """A 401 must read as an expired session, not the generic error."""
+    page.goto(live_server + "/")
+    page.evaluate("document.querySelector('meta[name=\"chat-token\"]').content = 'not-a-token'")
+
+    message_input(page).fill("this should be rejected")
+    send_button(page).click()
+
+    expect(page.get_by_text("Your session expired. Please reload the page.")).to_be_visible()
+
+
 def test_conversation_log_scrolls_to_reveal_latest_reply(page: Page, live_server: str) -> None:
     page.goto(live_server + "/")
     page.set_viewport_size({"width": 800, "height": 600})

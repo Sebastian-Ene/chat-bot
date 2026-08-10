@@ -2,31 +2,40 @@
 
 > A run-list of tasks. No rationale — decisions live in
 > `docs/requirements.md`, their reasoning in `docs/considerations.md`.
-> Struck-through items are done.
+>
+> Within each section, outstanding work comes first. Everything below the
+> `--- Done ---` delimiter is finished (and struck through).
 
 ## Setup
+
+--- Done ---
 - ~~Create a proper py project~~
 - ~~Add a project description for AI~~
 
 ## Backend
-- ~~Create b-e with Python (FastAPI)~~
-- ~~Mock RAG/LLM responses so the API contract exists before real RAG is wired in~~
-- ~~Chat endpoint(s) serving the mocked responses, streamed~~
-- ~~Validate the chat message field (non-blank, length bounds)~~
-- ~~Extend `POST /api/chat` to accept prior turns; cap turn count and total length~~ (10 turns, 10 000 chars total, 4 000 per turn)
 - Validate and guard every turn, not just the latest — validation done (shape, bounds, caps, leading-user rule); **guarding** still open, see the TODO in `app/rag/llm.py`
 - Change `retrieve()` to return chunks with metadata, not `list[str]`
 - Query rewrite step: structured output returning a query string, run before retrieval
 - Retrieve on both original and rewritten query as separate `prefetch` branches, fused with RRF
 - Run CPU-bound models (embedder, vision model) in a thread pool behind a bounded semaphore
-- ~~Record TTFT and total completion per request, plus per-stage timers~~ (`app/timings.py`) — retrieval and generation are timed; rewrite/embed/search/expansion get timed as they are built, no collector change needed
-- ~~Split logging: ordinary logs at INFO, timings at DEBUG, separate files~~ (`app/logging_config.py`)
 - Produce a latency breakdown to present, not just pass/fail against 5s — raw per-request breakdown lands in `logs/performance.log`; the presentable summary comes with the eval harness
-- ~~API key and secret management: `.env` → OS env, no credentials in source~~ (`app/config.py`)
-- ~~Add `.env` to `.gitignore` and commit a placeholder `.env.example`~~
 - Document any additional security considerations
 
+--- Done ---
+- ~~Create b-e with Python (FastAPI)~~
+- ~~Mock RAG/LLM responses so the API contract exists before real RAG is wired in~~
+- ~~Chat endpoint(s) serving the mocked responses, streamed~~
+- ~~Validate the chat message field (non-blank, length bounds)~~
+- ~~Extend `POST /api/chat` to accept prior turns; cap turn count and total length~~ (10 turns, 10 000 chars total, 4 000 per turn)
+- ~~Record TTFT and total completion per request, plus per-stage timers~~ (`app/timings.py`) — retrieval and generation are timed; rewrite/embed/search/expansion get timed as they are built, no collector change needed
+- ~~Split logging: ordinary logs at INFO, timings at DEBUG, separate files~~ (`app/logging_config.py`)
+- ~~API key and secret management: `.env` → OS env, no credentials in source~~ (`app/config.py`)
+- ~~Add `.env` to `.gitignore` and commit a placeholder `.env.example`~~
+- ~~API endpoint security: JWT embedded in the chat page, sent with every request, signature + TTL checked~~ (`app/security.py`) — opt-in per endpoint via `dependencies=[Depends(verify_token)]`; documented as a demonstration, not auth
+
 ## Frontend
+
+--- Done ---
 - ~~Turn `app/templates/index.html` into an actual chat interface~~
 - ~~JS chat widget consuming a streaming response from `/api/chat`~~
 - ~~Fix accessible color contrast on chat bubbles~~
@@ -62,37 +71,42 @@
 - Use Qdrant's embedded mode (`:memory:` / local path) in unit tests
 
 ## RAG — Generate
-- ~~Integrate the LLM via API, replacing the mocked responses~~ (`app/rag/llm.py`)
-- ~~Keep model configuration in one place~~ (`app/config.py`)
-- ~~Do not use `output_config.effort` — it errors on Haiku 4.5~~
-- Assert `cache_read_input_tokens > 0` in a test — blocked: Haiku 4.5's prompt-cache
-  minimum is 4096 tokens, which the current prompt is nowhere near. Revisit once
-  real retrieved chunks push the prefix past it
 - Enable citations on the generation call; fall back to a canned reply when a response carries none (TODO in `app/rag/llm.py`)
 - Implement prompt guardrails on user input (TODO in `app/rag/llm.py`):
     - Protection against prompt injection
     - Clear system instructions and role separation
     - Constraints keeping responses aligned with the knowledge base
+    - Cover every history turn, not just the current question — assistant turns are client-supplied and forgeable
+- Assert `cache_read_input_tokens > 0` in a test — blocked: Haiku 4.5's prompt-cache
+  minimum is 4096 tokens, which the current prompt is nowhere near. Revisit once
+  real retrieved chunks push the prefix past it
+
+--- Done ---
+- ~~Integrate the LLM via API, replacing the mocked responses~~ (`app/rag/llm.py`)
+- ~~Keep model configuration in one place~~ (`app/config.py`)
+- ~~Do not use `output_config.effort` — it errors on Haiku 4.5~~
 
 ## Ops / Packaging
 - `docker-compose.yml`: backend service + Qdrant, no load balancer
 - Docker image builds via `uv`
 - Bake model weights into the image at build time so first run is offline
 - Verify `docker compose up` gives a working app with no manual DB setup
+- Mount the container against the working tree in dev so `logs/` is written to the host and survives the container
 - Package the whole project as a single zip for delivery
 
 ## Testing
-- ~~Set up Playwright (`pytest-playwright`) e2e testing with an accessible-role/text locator convention~~
-- ~~e2e tests: page loads with expected elements; title/input stay pinned on long conversations; log scrolls to reveal latest reply~~
-- ~~Unit tests for the mocked RAG functions and API tests for `POST /api/chat`~~
 - Decide: how to demonstrate/measure answer accuracy and reliability
 - Build the eval harness: retrieval metrics (recall@k, MRR) and answer correctness
 - Single-prompt latency tests asserting completion under 5s
 - Lightweight concurrent-users test showing no unacceptable degradation
 
+--- Done ---
+- ~~Set up Playwright (`pytest-playwright`) e2e testing with an accessible-role/text locator convention~~
+- ~~e2e tests: page loads with expected elements; title/input stay pinned on long conversations; log scrolls to reveal latest reply; conversation keeps succeeding past the history cap~~
+- ~~Unit tests for the mocked RAG functions and API tests for `POST /api/chat`~~
+
 ## Deferred (only if time allows)
 - Re-ranking
-- Compare BGE-M3 against a smaller embedder on the golden Q&A set
 - Multi-turn eval cases
 - Verification spikes: `PictureItem.image` on DOCX/HTML; whether `HybridChunker` emits pictures as their own chunks
 
@@ -100,5 +114,7 @@
 - Architecture overview
 - Key design decisions and trade-offs
 - Chosen models, tools, and technologies
+
+--- Done ---
 - ~~Track prompts used during development~~ (`scripts/export_chat_log.py`)
 - ~~Note the AI trace capture is Claude-Code-only~~ (`docs/considerations.md`)

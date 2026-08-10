@@ -225,6 +225,14 @@ quality. No specific metric mandated by the brief.
 - No hardcoded credentials. **Secrets via `.env`**, read into the OS environment
   and consumed from there. `.env` gitignored, `.env.example` committed
 - Guardrails apply to user input only (see §6.3)
+- **API tokens (implemented):** the chat page embeds a short-lived HS256 JWT
+  (`JWT_SECRET`, required; `JWT_TTL_SECONDS`, default 300); the frontend sends it
+  as `Authorization: Bearer …` and `app/security.py:verify_token` checks
+  signature and expiry, returning 401 otherwise. Endpoints opt in via
+  `dependencies=[Depends(verify_token)]`.
+  **This is not authentication** — anyone who loads the page gets a token. It
+  demonstrates the mechanism; see `docs/considerations.md` for what it does and
+  does not buy
 
 ## 8. Testing
 

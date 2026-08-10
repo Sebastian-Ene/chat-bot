@@ -8,9 +8,19 @@ import uvicorn
 # Set before `app.config` loads `.env`, so tests never reach for a real key.
 # `load_dotenv()` does not override values already in the environment.
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
+# At least 32 bytes — PyJWT warns below that for HS256 (RFC 7518 §3.2).
+os.environ.setdefault("JWT_SECRET", "test-jwt-secret-long-enough-for-hs256")
 
 from app.main import app  # noqa: E402
 from tests.fake_anthropic import FakeAnthropic  # noqa: E402
+
+
+@pytest.fixture
+def auth_headers() -> dict[str, str]:
+    """A valid token, as the chat page would embed."""
+    from app.security import issue_token
+
+    return {"Authorization": f"Bearer {issue_token()}"}
 
 
 @pytest.fixture(autouse=True)

@@ -459,6 +459,41 @@ credentials in source, satisfying the brief's mandatory requirement. `.env` must
 be gitignored with a placeholder `.env.example` committed in its place. In
 production this would be a secrets manager rather than a file on disk.
 
+### API tokens — a demonstration, not authentication
+
+The chat page embeds a short-lived signed token (HS256 JWT, 5-minute TTL) in a
+`<meta>` tag; the frontend sends it as `Authorization: Bearer …` on every API
+call, and `verify_token` checks signature and expiry.
+
+**This is explicitly not security, because there is no auth.** Anyone who can
+load the page is handed a valid token, so it establishes no identity and keeps
+no one out — the brief does not require authentication (requirements §7.3) and
+none is implemented. What it stops is the *casual* case: an API called directly
+with no token at all.
+
+What it does buy is that the mechanics real auth needs are in place and
+demonstrated rather than described: a signed, expiring credential; verification
+on every request; rejection as a flat 401 that leaks no reason to the caller
+(the reason is logged instead); and a single `verify_token` dependency that any
+future endpoint opts into with `dependencies=[Depends(verify_token)]`. Swapping
+in real authentication becomes a change of *what the token asserts*, not a
+rewrite of where it is checked.
+
+Known limitations, stated rather than hidden:
+
+- **The token is in the HTML**, so any XSS on the page can read it. With real
+  auth this would be an `HttpOnly` cookie or an in-memory token from a login
+  exchange.
+- **No identity, no revocation, no rotation** — nothing to revoke, since every
+  page render mints a fresh token.
+- **The TTL is user-visible.** At 5 minutes a page left open will start getting
+  401s; the frontend surfaces "Your session expired. Please reload the page."
+  rather than a generic failure. A refresh endpoint would remove the friction
+  and is the obvious next step if it becomes annoying.
+- **`JWT_SECRET` is one value for the whole app.** Every process serving it must
+  share the secret, or tokens minted by one are rejected by another — so it is a
+  required setting rather than a per-process default.
+
 ## Verification spikes — deferred
 
 Several open questions about Docling's behaviour — whether `PictureItem.image`

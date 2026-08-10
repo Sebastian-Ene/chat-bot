@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-haiku-4-5"
     qdrant_url: str = "http://localhost:6333"
 
+    # One secret for the whole app, supplied via `.env`. Every process that
+    # serves the app must share it, or tokens minted by one are rejected by
+    # another.
+    jwt_secret: SecretStr
+    jwt_ttl_seconds: int = 300
+
     # DEBUG by default: per-stage timings are only measured at this level, and
     # this is a PoC whose latency breakdown is a deliverable.
     log_level: str = "DEBUG"

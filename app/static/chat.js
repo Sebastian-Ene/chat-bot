@@ -43,17 +43,32 @@ document.addEventListener("DOMContentLoaded", () => {
     return el;
   }
 
-  function setErrorReply(assistantEl) {
-    assistantEl.textContent = "Something went wrong. Please try again.";
+  function setErrorReply(assistantEl, text = "Something went wrong. Please try again.") {
+    assistantEl.textContent = text;
     scrollToBottom();
+  }
+
+  // Minted when the page was rendered and short-lived, so a page left open long
+  // enough will start getting 401s until it is reloaded. Read per request rather
+  // than cached at load, so a refreshed token would be picked up without a reload.
+  function chatToken() {
+    return document.querySelector('meta[name="chat-token"]')?.content ?? "";
   }
 
   async function streamReply(message, assistantEl) {
     const response = await fetch("/api/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${chatToken()}`,
+      },
       body: JSON.stringify({ message, history: historyToSend() }),
     });
+
+    if (response.status === 401) {
+      setErrorReply(assistantEl, "Your session expired. Please reload the page.");
+      return null;
+    }
 
     if (!response.ok || !response.body) {
       setErrorReply(assistantEl);

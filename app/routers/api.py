@@ -2,13 +2,14 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from app.logging_config import APP_LOGGER
 from app.rag.llm import stream_completion
 from app.rag.retriever import retrieve
+from app.security import verify_token
 from app.timings import create_timings
 
 router = APIRouter(prefix="/api")
@@ -88,7 +89,7 @@ async def _generate_reply(query: str, history: list[Turn]) -> AsyncIterator[str]
     timings.log(message_length=len(query), history_turns=len(history))
 
 
-@router.post("/chat")
+@router.post("/chat", dependencies=[Depends(verify_token)])
 async def chat(request: ChatRequest) -> StreamingResponse:
     logger.info(
         "chat request received message_length=%d history_turns=%d",
