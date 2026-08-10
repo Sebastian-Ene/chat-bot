@@ -180,7 +180,12 @@ That is for showcasing production-aware thinking, not because the PoC needs it.
   server-side session store
   - the entire history is user input, including assistant turns, which a caller
     can forge. Validation and guardrails apply to every turn
-  - cap turn count and total length
+  - **caps:** 10 turns, 10 000 characters total, 4 000 per turn — rejected with
+    422. History must start with a `user` turn, since the Messages API requires
+    it; enforcing it here turns a forged history into our 422 rather than a 400
+    from Anthropic
+  - the client trims to these caps before sending, so a long conversation
+    degrades by dropping the oldest turns instead of failing
 - The LLM sees prior turns but **only the current turn's retrieved chunks**
 - Prompt order: system → history → retrieved documents → question
 - **Query rewriting runs on every request**, before retrieval, using structured

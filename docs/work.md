@@ -13,8 +13,8 @@
 - ~~Mock RAG/LLM responses so the API contract exists before real RAG is wired in~~
 - ~~Chat endpoint(s) serving the mocked responses, streamed~~
 - ~~Validate the chat message field (non-blank, length bounds)~~
-- Extend `POST /api/chat` to accept prior turns; cap turn count and total length
-- Validate and guard every turn, not just the latest
+- ~~Extend `POST /api/chat` to accept prior turns; cap turn count and total length~~ (10 turns, 10 000 chars total, 4 000 per turn)
+- Validate and guard every turn, not just the latest — validation done (shape, bounds, caps, leading-user rule); **guarding** still open, see the TODO in `app/rag/llm.py`
 - Change `retrieve()` to return chunks with metadata, not `list[str]`
 - Query rewrite step: structured output returning a query string, run before retrieval
 - Retrieve on both original and rewritten query as separate `prefetch` branches, fused with RRF
@@ -32,7 +32,7 @@
 - ~~Fix accessible color contrast on chat bubbles~~
 - ~~Fix chat title scrolling out of view during long conversations~~
 - ~~Fix conversation log not scrolling to reveal the latest reply~~
-- Send prior turns with each request
+- ~~Send prior turns with each request~~ (trims to the server's caps so long conversations don't start 422ing)
 
 ## Test document corpus
 - Generate 50 initial docs: PDF/DOCX/HTML mix, 1-25 pages, ~50/50 EN/DE, ~20% cross-lingual overlap

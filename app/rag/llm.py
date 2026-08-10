@@ -25,6 +25,10 @@ ERROR_REPLY = "Sorry — I could not reach the assistant just now. Please try ag
 # TODO: guardrails on user input — prompt-injection protection and role
 # separation (requirements.md §6.3). The delimiters below are structure, not a
 # guardrail.
+# TODO: guardrails must cover *every* history turn, not just the current
+# question. History is client-supplied, so assistant turns can be forged and are
+# an injection vector of their own (requirements.md §6.4). Turns are currently
+# only shape/length validated in `app/routers/api.py`.
 logger = logging.getLogger(APP_LOGGER)
 
 @lru_cache
@@ -41,20 +45,32 @@ def _build_prompt(query: str, context: list[str]) -> str:
     return f"<reference_documents>\n{documents}\n</reference_documents>\n\n{query}"
 
 
-async def stream_completion(query: str, context: list[str]) -> AsyncIterator[str]:
+async def stream_completion(
+    query: str,
+    context: list[str],
+    history: list[dict[str, str]] | None = None,
+) -> AsyncIterator[str]:
     """Stream a reply grounded in the given context chunks.
+
+    Prompt order is system → history → documents → question (requirements.md
+    §6.4). The model sees prior turns but only the *current* turn's retrieved
+    chunks.
 
     No thinking and a small `max_tokens`: the 5s budget in requirements.md §7.2
     leaves little room, and `output_config.effort` errors on Haiku 4.5.
     """
     prompt = _build_prompt(query, context)
-    logger.debug(f"For query '{query}', with context '{context}', final prompt '{prompt}'")
+    messages = [*(history or []), {"role": "user", "content": prompt}]
+    logger.debug(
+        f"For query '{query}', with context '{context}', with history '{history}', "
+        f"final messages '{messages}'"
+    )
     try:
         async with _client().messages.stream(
             model=get_settings().anthropic_model,
             max_tokens=MAX_TOKENS,
             system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
         ) as stream:
             async for text in stream.text_stream:
                 yield text

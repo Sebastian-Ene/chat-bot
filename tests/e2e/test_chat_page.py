@@ -8,6 +8,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.e2e.locators import chat_heading, conversation_log, message_input, send_button
+from tests.fake_anthropic import STUBBED_REPLY
 
 pytestmark = pytest.mark.e2e
 
@@ -68,6 +69,20 @@ def test_title_and_input_stay_visible_with_long_conversation(page: Page, live_se
     expect(chat_heading(page)).to_be_in_viewport()
     expect(message_input(page)).to_be_in_viewport()
     expect(send_button(page)).to_be_in_viewport()
+
+
+def test_conversation_keeps_succeeding_past_the_history_cap(page: Page, live_server: str) -> None:
+    """The client trims history to the server's caps. Without trimming the
+    requests 422 and every reply becomes the error text — which the bubble-count
+    assertions in the other tests would not catch."""
+    page.goto(live_server + "/")
+
+    exchanges = 8  # 16 turns, comfortably past the 10-turn cap
+    for index in range(exchanges):
+        _send_message_and_wait_for_reply(page, f"history cap message {index}")
+
+    expect(page.get_by_text("Something went wrong. Please try again.")).to_have_count(0)
+    expect(page.get_by_text(STUBBED_REPLY, exact=True)).to_have_count(exchanges)
 
 
 def test_conversation_log_scrolls_to_reveal_latest_reply(page: Page, live_server: str) -> None:

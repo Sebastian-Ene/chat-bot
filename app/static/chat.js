@@ -3,6 +3,34 @@ document.addEventListener("DOMContentLoaded", () => {
   const input = document.getElementById("chat-input");
   const messages = document.getElementById("messages");
 
+  // Conversation history is stateless server-side: we hold prior turns here and
+  // send them with each request. Kept in step with the caps in app/routers/api.py
+  // — exceeding any of them is a 422, so we trim rather than let the send fail.
+  const MAX_HISTORY_TURNS = 10;
+  const MAX_HISTORY_CHARS = 10000;
+  const MAX_TURN_CHARS = 4000;
+
+  const turns = [];
+
+  function historyToSend() {
+    const kept = turns.slice(-MAX_HISTORY_TURNS);
+
+    let total = kept.reduce((sum, turn) => sum + turn.content.length, 0);
+    while (kept.length && total > MAX_HISTORY_CHARS) {
+      total -= kept.shift().content.length;
+    }
+
+    // The API requires history to start with a user turn; trimming can leave an
+    // assistant turn at the front.
+    while (kept.length && kept[0].role !== "user") kept.shift();
+
+    return kept;
+  }
+
+  function recordTurn(role, content) {
+    turns.push({ role, content: content.slice(0, MAX_TURN_CHARS) });
+  }
+
   function scrollToBottom() {
     messages.scrollTop = messages.scrollHeight;
   }
@@ -24,23 +52,28 @@ document.addEventListener("DOMContentLoaded", () => {
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, history: historyToSend() }),
     });
 
     if (!response.ok || !response.body) {
       setErrorReply(assistantEl);
-      return;
+      return null;
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    let reply = "";
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      assistantEl.textContent += decoder.decode(value, { stream: true });
+      const chunk = decoder.decode(value, { stream: true });
+      reply += chunk;
+      assistantEl.textContent += chunk;
       scrollToBottom();
     }
+
+    return reply;
   }
 
   form.addEventListener("submit", async (event) => {
@@ -54,7 +87,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const assistantEl = addMessage("assistant");
     try {
-      await streamReply(message, assistantEl);
+      const reply = await streamReply(message, assistantEl);
+      // Only record a completed exchange — a failed turn would otherwise put an
+      // error message into the history as if the assistant had said it.
+      if (reply) {
+        recordTurn("user", message);
+        recordTurn("assistant", reply);
+      }
     } catch (err) {
       setErrorReply(assistantEl);
     } finally {

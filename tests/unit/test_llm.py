@@ -38,6 +38,46 @@ async def test_stream_completion_puts_context_before_the_question(
 
 
 @pytest.mark.anyio
+async def test_stream_completion_puts_history_before_the_current_turn(
+    stub_anthropic: FakeAnthropic,
+) -> None:
+    """Prompt order is system → history → documents → question (§6.4)."""
+    history = [
+        {"role": "user", "content": "what is the refund window?"},
+        {"role": "assistant", "content": "thirty days"},
+    ]
+
+    [
+        chunk
+        async for chunk in stream_completion(
+            "and for gift cards?", context=["gift cards are non-refundable"], history=history
+        )
+    ]
+
+    sent = stub_anthropic.messages.calls[0]["messages"]
+    assert sent[:2] == history
+    assert "gift cards are non-refundable" in sent[-1]["content"]
+
+
+@pytest.mark.anyio
+async def test_stream_completion_keeps_context_out_of_history_turns(
+    stub_anthropic: FakeAnthropic,
+) -> None:
+    """The model sees prior turns but only the current turn's chunks (§6.4)."""
+    history = [{"role": "user", "content": "what is the refund window?"}]
+
+    [
+        chunk
+        async for chunk in stream_completion(
+            "and for gift cards?", context=["gift cards are non-refundable"], history=history
+        )
+    ]
+
+    sent = stub_anthropic.messages.calls[0]["messages"]
+    assert "gift cards are non-refundable" not in sent[0]["content"]
+
+
+@pytest.mark.anyio
 async def test_stream_completion_yields_a_fallback_when_the_api_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
