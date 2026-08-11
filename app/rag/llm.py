@@ -1,54 +1,52 @@
 """Generation: stream a reply from Claude, grounded in retrieved context."""
 import logging
 
-from collections.abc import AsyncIterator
-from functools import lru_cache
+from collections.abc import AsyncIterator, Callable
 
 import anthropic
 
+from app import anthropic_client
 from app.config import get_settings
-from app.logging_config import APP_LOGGER
+from app.guardrails import SYSTEM_PROMPT, guard
+from app.logging_config import APP_LOGGER, truncate
+from app.timings import TokenUsage
 
 MAX_TOKENS = 1024
-
-SYSTEM_PROMPT = (
-    "You are a customer-support assistant. Answer the user's question using only "
-    "the reference documents provided in their message. If the documents do not "
-    "contain the answer, say so plainly instead of guessing."
-)
 
 ERROR_REPLY = "Sorry — I could not reach the assistant just now. Please try again."
 
 # TODO: enable Claude's native citations once retrieval returns real chunks with
 # metadata, and fall back to a canned reply when a response carries none
 # (requirements.md §6.3).
-# TODO: guardrails on user input — prompt-injection protection and role
-# separation (requirements.md §6.3). The delimiters below are structure, not a
-# guardrail.
-# TODO: guardrails must cover *every* history turn, not just the current
-# question. History is client-supplied, so assistant turns can be forged and are
-# an injection vector of their own (requirements.md §6.4). Turns are currently
-# only shape/length validated in `app/routers/api.py`.
 logger = logging.getLogger(APP_LOGGER)
 
-@lru_cache
-def _client() -> anthropic.AsyncAnthropic:
-    """One client per process — it owns a connection pool."""
-    return anthropic.AsyncAnthropic(
-        api_key=get_settings().anthropic_api_key.get_secret_value()
+def _build_prompt(query: str, context: list[str]) -> str:
+    """Retrieved documents before the question (requirements.md §6.4).
+
+    Context is not guarded: indexed documents are trusted for this PoC, and the
+    guardrail scope is user input only (§6.3).
+    """
+    documents = "\n\n".join(context)
+    return (
+        f"<reference_documents>\n{documents}\n</reference_documents>\n\n"
+        f"<user_message>\n{guard(query, source='question')}\n</user_message>"
     )
 
 
-def _build_prompt(query: str, context: list[str]) -> str:
-    """Retrieved documents before the question (requirements.md §6.4)."""
-    documents = "\n\n".join(context)
-    return f"<reference_documents>\n{documents}\n</reference_documents>\n\n{query}"
+def _guard_history(history: list[dict[str, str]] | None) -> list[dict[str, str]]:
+    """Every turn is guarded, not just the latest — including assistant turns,
+    which the client supplies and can therefore forge (§6.4)."""
+    return [
+        {"role": turn["role"], "content": guard(turn["content"], source=f"history:{turn['role']}")}
+        for turn in (history or [])
+    ]
 
 
 async def stream_completion(
     query: str,
     context: list[str],
     history: list[dict[str, str]] | None = None,
+    on_usage: Callable[[TokenUsage], None] | None = None,
 ) -> AsyncIterator[str]:
     """Stream a reply grounded in the given context chunks.
 
@@ -60,13 +58,19 @@ async def stream_completion(
     leaves little room, and `output_config.effort` errors on Haiku 4.5.
     """
     prompt = _build_prompt(query, context)
-    messages = [*(history or []), {"role": "user", "content": prompt}]
+    messages = [*_guard_history(history), {"role": "user", "content": prompt}]
     logger.debug(
-        f"For query '{query}', with context '{context}', with history '{history}', "
-        f"final messages '{messages}'"
+        # repr keeps the whole line greppable by request id — a raw multi-line
+        # prompt would leave its later lines unprefixed.
+        "stage=prompt system_chars=%d prompt_chars=%d history_turns=%d prompt=%r",
+        len(SYSTEM_PROMPT),
+        len(prompt),
+        len(messages) - 1,
+        truncate(prompt),
     )
+    logger.debug(messages)
     try:
-        async with _client().messages.stream(
+        async with anthropic_client.get_client().messages.stream(
             model=get_settings().anthropic_model,
             max_tokens=MAX_TOKENS,
             system=SYSTEM_PROMPT,
@@ -74,6 +78,10 @@ async def stream_completion(
         ) as stream:
             async for text in stream.text_stream:
                 yield text
+            if on_usage is not None:
+                # Only available once the stream is drained.
+                final = await stream.get_final_message()
+                on_usage(TokenUsage.from_sdk(getattr(final, "usage", None)))
     except anthropic.APIError:
         # The response has already started, so this appends to whatever streamed
         # before the failure rather than replacing it.

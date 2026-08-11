@@ -28,7 +28,7 @@ def stub_anthropic(monkeypatch: pytest.MonkeyPatch) -> FakeAnthropic:
     """No test may call the real API — including e2e, which drives the app
     in-process via `live_server`, so patching the module attribute reaches it."""
     client = FakeAnthropic()
-    monkeypatch.setattr("app.rag.llm._client", lambda: client)
+    monkeypatch.setattr("app.anthropic_client.get_client", lambda: client)
     return client
 
 

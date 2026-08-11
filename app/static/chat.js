@@ -75,6 +75,8 @@ document.addEventListener("DOMContentLoaded", () => {
       return null;
     }
 
+    const outcome = response.headers.get("X-Chat-Outcome");
+
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let reply = "";
@@ -88,7 +90,7 @@ document.addEventListener("DOMContentLoaded", () => {
       scrollToBottom();
     }
 
-    return reply;
+    return { reply, outcome };
   }
 
   form.addEventListener("submit", async (event) => {
@@ -102,12 +104,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const assistantEl = addMessage("assistant");
     try {
-      const reply = await streamReply(message, assistantEl);
-      // Only record a completed exchange — a failed turn would otherwise put an
-      // error message into the history as if the assistant had said it.
-      if (reply) {
+      const result = await streamReply(message, assistantEl);
+      // Only a real answer enters the history. A refused message must not be
+      // recorded: the next request would then be judged against a conversation
+      // containing the attack, and one refusal would poison the whole session.
+      // Failed turns are skipped for the same reason — an error is not something
+      // the assistant said.
+      if (result && result.outcome === "answered") {
         recordTurn("user", message);
-        recordTurn("assistant", reply);
+        recordTurn("assistant", result.reply);
       }
     } catch (err) {
       setErrorReply(assistantEl);

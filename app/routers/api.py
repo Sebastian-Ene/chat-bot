@@ -2,19 +2,33 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Literal
 
-from fastapi import APIRouter, Depends
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Response
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from app.logging_config import APP_LOGGER
+from app.logging_config import APP_LOGGER, truncate
 from app.rag.llm import stream_completion
-from app.rag.retriever import retrieve
+from app.rag.query_analysis import AnalysisUnavailable, analyse_query
+from app.rag.retriever import RetrievalQueries, retrieve
+from app.request_context import new_request_id, set_request_id
 from app.security import verify_token
 from app.timings import create_timings
 
 router = APIRouter(prefix="/api")
 
 logger = logging.getLogger(APP_LOGGER)
+
+# Content decisions, not protocol errors, so both come back as a normal 200.
+# Kept distinct: a user who asked something legitimate should not be told they
+# did something wrong just because we broke.
+REFUSAL_REPLY = "I can't help with that request."
+UNAVAILABLE_REPLY = "Sorry — I couldn't process that just now. Please try again."
+
+# The client cannot tell a refusal from an answer by the body alone, and must not
+# record a refused exchange into history — otherwise the next request is judged
+# against a conversation containing the attack, and one refusal poisons the
+# session.
+OUTCOME_HEADER = "X-Chat-Outcome"
 
 # Conversation history is stateless: the client sends prior turns, so the whole
 # history is caller-supplied and every turn is validated, not just the latest
@@ -67,35 +81,114 @@ class ChatRequest(BaseModel):
         return turns
 
 
-async def _generate_reply(query: str, history: list[Turn]) -> AsyncIterator[str]:
-    timings = create_timings()
+def _headers(request_id: str, outcome: str) -> dict[str, str]:
+    # X-Request-ID ties a reply to its log lines; X-Chat-Outcome tells the client
+    # whether this exchange belongs in the conversation history.
+    return {"X-Request-ID": request_id, OUTCOME_HEADER: outcome}
+
+
+def _log_completion(outcome: str, query: str, turns: int, timings, chunks: int = 0) -> None:
+    logger.info(
+        "chat request completed outcome=%s message_length=%d chunks=%d history_turns=%d",
+        outcome,
+        len(query),
+        chunks,
+        turns,
+    )
+    timings.log(message_length=len(query), history_turns=turns, outcome=outcome)
+
+
+async def _stream_answer(
+    query: str,
+    turns: list[dict[str, str]],
+    analysis,
+    request_id: str,
+    timings,
+) -> AsyncIterator[str]:
+    # Re-set inside the generator: it is iterated after the endpoint returns, so
+    # this guarantees every downstream stage logs under the same id.
+    set_request_id(request_id)
+
+    queries = RetrievalQueries(
+        original=query,
+        rewritten=analysis.rewritten_query,
+        keywords=tuple(analysis.keywords),
+        sub_queries=tuple(analysis.sub_queries),
+    )
 
     with timings.stage("retrieval"):
-        context = await retrieve(query)
+        context = await retrieve(queries)
 
+    logger.debug(
+        "stage=retrieval branches=%s chunks=%d preview=%r",
+        ",".join(queries.branches()),
+        len(context),
+        truncate(" | ".join(context)),
+    )
+
+    reply_chars = 0
+    streamed = 0
     with timings.stage("generation"):
         async for chunk in stream_completion(
-            query, context, history=[turn.model_dump() for turn in history]
+            query, context, history=turns, on_usage=timings.usage_recorder("generation")
         ):
             timings.mark_first_token()
+            reply_chars += len(chunk)
+            streamed += 1
             yield chunk
 
-    logger.info(
-        "chat request completed message_length=%d chunks=%d history_turns=%d",
-        len(query),
-        len(context),
-        len(history),
+    logger.debug(
+        "stage=generation reply_chars=%d chunks_streamed=%d", reply_chars, streamed
     )
-    timings.log(message_length=len(query), history_turns=len(history))
+    _log_completion("answered", query, len(turns), timings, chunks=len(context))
 
 
 @router.post("/chat", dependencies=[Depends(verify_token)])
-async def chat(request: ChatRequest) -> StreamingResponse:
+async def chat(request: ChatRequest) -> Response:
+    """Analysis runs here rather than inside the generator: response headers are
+    sent before the generator is iterated, so the outcome has to be known first.
+    """
+    request_id = new_request_id()
+    set_request_id(request_id)
     logger.info(
         "chat request received message_length=%d history_turns=%d",
         len(request.message),
         len(request.history),
     )
+
+    query = request.message
+    turns = [turn.model_dump() for turn in request.history]
+    timings = create_timings()
+    logger.debug("stage=input message=%r history_turns=%d", truncate(query), len(turns))
+
+    # Safety verdict and query rewrite share one call, before retrieval.
+    analysis = None
+    with timings.stage("analysis"):
+        try:
+            analysis = await analyse_query(
+                query, turns, on_usage=timings.usage_recorder("analysis")
+            )
+        except AnalysisUnavailable:
+            logger.exception("query analysis unavailable — refusing (fail closed)")
+
+    # Fail closed: without a verdict we do not retrieve and do not generate.
+    if analysis is None:
+        timings.mark_first_token()
+        _log_completion("unavailable", query, len(turns), timings)
+        return PlainTextResponse(
+            UNAVAILABLE_REPLY, headers=_headers(request_id, "unavailable")
+        )
+
+    if not analysis.safe:
+        logger.warning("refused unsafe request category=%s", analysis.category)
+        timings.mark_first_token()
+        _log_completion("refused", query, len(turns), timings)
+        return PlainTextResponse(
+            REFUSAL_REPLY, headers=_headers(request_id, "refused")
+        )
+
     return StreamingResponse(
-        _generate_reply(request.message, request.history), media_type="text/plain"
+        _stream_answer(query, turns, analysis, request_id, timings),
+        media_type="text/plain",
+        headers=_headers(request_id, "answered"),
     )

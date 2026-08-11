@@ -11,13 +11,22 @@ import logging
 from logging.handlers import RotatingFileHandler
 
 from app.config import get_settings
+from app.request_context import RequestIdFilter
 
 APP_LOGGER = "app"
 PERFORMANCE_LOGGER = "app.performance"
 
-_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+_FORMAT = "%(asctime)s %(levelname)s %(name)s [%(request_id)s] %(message)s"
 _MAX_BYTES = 5 * 1024 * 1024
 _BACKUP_COUNT = 3
+
+
+def truncate(text: str) -> str:
+    """Cap text in trace lines, marking what was dropped."""
+    limit = get_settings().log_max_chars
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}…(+{len(text) - limit} more chars)"
 
 
 def _file_handler(path, level: int) -> RotatingFileHandler:
@@ -36,6 +45,8 @@ def configure_logging() -> None:
     app_logger = logging.getLogger(APP_LOGGER)
     app_logger.setLevel(level)
     app_logger.handlers.clear()
+    app_logger.filters.clear()
+    app_logger.addFilter(RequestIdFilter())
 
     console = logging.StreamHandler()
     console.setLevel(level)
@@ -46,6 +57,8 @@ def configure_logging() -> None:
     performance_logger = logging.getLogger(PERFORMANCE_LOGGER)
     performance_logger.setLevel(level)
     performance_logger.handlers.clear()
+    performance_logger.filters.clear()
+    performance_logger.addFilter(RequestIdFilter())
     performance_logger.addHandler(
         _file_handler(settings.log_dir / "performance.log", level)
     )

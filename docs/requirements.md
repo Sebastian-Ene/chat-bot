@@ -179,7 +179,10 @@ That is for showcasing production-aware thinking, not because the PoC needs it.
 - **Conversation history is stateless** — the client sends prior turns; no
   server-side session store
   - the entire history is user input, including assistant turns, which a caller
-    can forge. Validation and guardrails apply to every turn
+    can forge. Validation and guardrails apply to every turn, and the analysis
+    call (§6.4) judges the whole conversation — refusing with `forged_history`
+    when a prior assistant turn reads as fabricated. That is judgment, not
+    integrity: a subtly-worded forgery can still pass, which is accepted
   - **caps:** 10 turns, 10 000 characters total, 4 000 per turn — rejected with
     422. History must start with a `user` turn, since the Messages API requires
     it; enforcing it here turns a forged history into our 422 rather than a 400
@@ -191,6 +194,15 @@ That is for showcasing production-aware thinking, not because the PoC needs it.
 - **Query rewriting runs on every request**, before retrieval, using structured
   output. Retrieval runs on both the original and rewritten query as separate
   `prefetch` branches, fused with RRF
+- The rewrite also emits **keywords** and, for multi-part questions, **sub-queries**;
+  each populated field is its own `prefetch` branch. Both are behind
+  `REWRITE_KEYWORDS_ENABLED` / `REWRITE_SUB_QUERIES_ENABLED` so they can be A/B'd
+  once a corpus exists — they are unproven. No translated branch: cross-lingual
+  is left to BGE-M3's dense side
+- The same call also returns a **safety verdict** on the user's message
+  (`app/rag/query_analysis.py`), so both jobs cost one round trip rather than
+  two. Unsafe input is refused before retrieval and generation. The caller
+  **fails closed**: no usable verdict means the request is refused
 - Must support concurrent access, stream responses, and emit timing metrics
 
 ### 6.5 Frontend
@@ -217,7 +229,12 @@ quality. No specific metric mandated by the brief.
   only arrives after rewrite → embed → search → expansion → generation
 - **Per-stage timers** on rewrite, embed, search, neighbour expansion and
   generation, so latency can be presented as a breakdown rather than a single
-  number
+  number. The rewrite stage is logged as `analysis`, since it carries the safety
+  verdict too. Each request also logs an `outcome` (`answered` / `refused` /
+  `unavailable`)
+- **Token usage per request** on the same line — `tokens_in` / `tokens_out` /
+  `cache_read` totals plus per-stage counts — so cost can be derived from
+  measured data rather than estimated
 
 ### 7.3 Security
 

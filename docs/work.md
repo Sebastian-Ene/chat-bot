@@ -13,10 +13,8 @@
 - ~~Add a project description for AI~~
 
 ## Backend
-- Validate and guard every turn, not just the latest — validation done (shape, bounds, caps, leading-user rule); **guarding** still open, see the TODO in `app/rag/llm.py`
 - Change `retrieve()` to return chunks with metadata, not `list[str]`
-- Query rewrite step: structured output returning a query string, run before retrieval
-- Retrieve on both original and rewritten query as separate `prefetch` branches, fused with RRF
+- Retrieve on both original and rewritten query as separate `prefetch` branches, fused with RRF — `retrieve()` takes a `RetrievalQueries` value object carrying every branch; the mock ignores it
 - Run CPU-bound models (embedder, vision model) in a thread pool behind a bounded semaphore
 - Produce a latency breakdown to present, not just pass/fail against 5s — raw per-request breakdown lands in `logs/performance.log`; the presentable summary comes with the eval harness
 - Document any additional security considerations
@@ -32,6 +30,9 @@
 - ~~API key and secret management: `.env` → OS env, no credentials in source~~ (`app/config.py`)
 - ~~Add `.env` to `.gitignore` and commit a placeholder `.env.example`~~
 - ~~API endpoint security: JWT embedded in the chat page, sent with every request, signature + TTL checked~~ (`app/security.py`) — opt-in per endpoint via `dependencies=[Depends(verify_token)]`; documented as a demonstration, not auth
+- ~~Validate and guard every turn, not just the latest~~ — validation in `app/routers/api.py` (shape, bounds, caps, leading-user rule), guarding in `app/guardrails.py` (question and every history turn, assistant turns included)
+- ~~Query rewrite step: structured output returning a query string, run before retrieval~~ (`app/rag/query_analysis.py`) — merged with an LLM safety verdict into one call; fails closed
+- ~~Validate history against tampering~~ — the analysis call judges the whole conversation, not just the latest message, and refuses with `forged_history` when a prior assistant turn reads as fabricated. This is judgment, not integrity: a subtly-worded forgery can still pass, and that is accepted
 
 ## Frontend
 
@@ -48,6 +49,7 @@
 - Make the corpus deliberately hard: multi-column pages, tables spanning page breaks, unruled tables, charts existing only as images
 - Give most figures a visible caption; leave a deliberate portion with none
 - Generate the golden Q&A set from the same step: table-only answers, image-only answers, cross-lingual pairs, multi-hop, and unanswerable questions
+- Once a minimal corpus exists: A/B `REWRITE_KEYWORDS_ENABLED` and `REWRITE_SUB_QUERIES_ENABLED` on the golden Q&A set — both branches are reasoned, not measured, and may be noise
 - Generate a follow-up batch of 5 docs
 - Generate a further batch of 10 docs
 
@@ -72,16 +74,16 @@
 
 ## RAG — Generate
 - Enable citations on the generation call; fall back to a canned reply when a response carries none (TODO in `app/rag/llm.py`)
-- Implement prompt guardrails on user input (TODO in `app/rag/llm.py`):
-    - Protection against prompt injection
-    - Clear system instructions and role separation
-    - Constraints keeping responses aligned with the knowledge base
-    - Cover every history turn, not just the current question — assistant turns are client-supplied and forgeable
 - Assert `cache_read_input_tokens > 0` in a test — blocked: Haiku 4.5's prompt-cache
   minimum is 4096 tokens, which the current prompt is nowhere near. Revisit once
   real retrieved chunks push the prefix past it
 
 --- Done ---
+- ~~Implement prompt guardrails on user input~~ (`app/guardrails.py`):
+    - ~~Protection against prompt injection~~ — sanitising always applied; detection logged, never blocking
+    - ~~Clear system instructions and role separation~~
+    - ~~Constraints keeping responses aligned with the knowledge base~~
+    - ~~Cover every history turn, not just the current question~~
 - ~~Integrate the LLM via API, replacing the mocked responses~~ (`app/rag/llm.py`)
 - ~~Keep model configuration in one place~~ (`app/config.py`)
 - ~~Do not use `output_config.effort` — it errors on Haiku 4.5~~
@@ -106,6 +108,7 @@
 - ~~Unit tests for the mocked RAG functions and API tests for `POST /api/chat`~~
 
 ## Deferred (only if time allows)
+- Rate limiting on `/api/chat` — a refused message is kept out of the history, so an attacker retries from a clean conversation with no accumulating penalty
 - Re-ranking
 - Multi-turn eval cases
 - Verification spikes: `PictureItem.image` on DOCX/HTML; whether `HybridChunker` emits pictures as their own chunks

@@ -29,10 +29,18 @@ class Settings(BaseSettings):
     jwt_secret: SecretStr
     jwt_ttl_seconds: int = 300
 
+    # Extra retrieval branches from the rewrite. Both are unproven — switch them
+    # off to A/B against the eval harness once a corpus exists.
+    rewrite_keywords_enabled: bool = True
+    rewrite_sub_queries_enabled: bool = True
+
     # DEBUG by default: per-stage timings are only measured at this level, and
     # this is a PoC whose latency breakdown is a deliverable.
     log_level: str = "DEBUG"
     log_dir: Path = Path("logs")
+    # Caps the message/prompt/chunk text in DEBUG trace lines. Prompts are tiny
+    # today; with real retrieved chunks they would swamp the log.
+    log_max_chars: int = 2000
 
 
 @lru_cache

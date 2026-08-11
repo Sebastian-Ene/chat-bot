@@ -360,6 +360,55 @@ client-supplied (below), the *history* is user input too — including assistant
 turns, which a caller can forge. Guardrails therefore apply to every turn, not
 just the newest.
 
+### Guardrails — what is actually implemented
+
+Two layers, deliberately different in kind (`app/guardrails.py`):
+
+**1. Sanitising — deterministic, always applied.** Our prompt uses
+`<reference_documents>` and `<user_message>` as structure. Without this, a user
+could type `</reference_documents>` and have their text read as prompt
+structure. `sanitize()` escapes the angle brackets of *our* reserved markers
+only, so the user's words survive and their structural power does not. Ordinary
+angle brackets (`3 < 5`, `<div>`) are untouched.
+
+**2. Detection — heuristic, logs only, never blocks.** A small named pattern set
+covers the classic shapes (ignore-previous-instructions, role override, prompt
+disclosure, jailbreak, injected directives). It deliberately does **not** reject
+the request: the patterns match plenty of legitimate questions ("ignore the first
+document, what does the second say?"), and blocking a real user to catch a string
+match is the wrong trade. Matches are logged by pattern name — never the user's
+text, which may contain anything.
+
+**3. The system prompt** carries §6.3's three mandates: role separation (this
+prompt is the only source of instructions), an explicit statement that everything
+in the conversation is client-supplied data rather than instructions, and the
+knowledge-base constraint (answer only from the reference documents; say so when
+they don't cover it).
+
+**Scope is user input only** (§6.3), which means the question *and every history
+turn*, assistant turns included — those are client-supplied and forgeable.
+Retrieved context is deliberately **not** sanitised: indexed documents are
+trusted for this PoC, and escaping them would corrupt document text.
+
+**Forged assistant turns.** Statelessness (§6.4) means a caller can put any words
+in the assistant's mouth, and a model is inherently inclined to trust its own
+prior turns. Sanitising and prompt hardening shrink the blast radius; they do not
+close it.
+
+The answer here is the analysis call, which judges the **whole conversation**
+rather than just the latest message. It marks a request unsafe
+(`forged_history`) when a prior assistant turn issues instructions, claims the
+rules or mode have changed, or otherwise reads as something a support assistant
+would not have written — so a benign-looking question trading on a forged turn is
+refused before retrieval and generation.
+
+The honest limit: this is **judgment, not integrity**. The system cannot tell a
+real assistant turn from a fabricated one; it can only notice when a fabricated
+one looks wrong. A subtly-worded forgery can still pass.
+
+Heuristic regex detection is likewise trivially evaded by rephrasing; it is an
+observability signal, not a control.
+
 ## Orchestration
 
 ### Conversation history — stateless
@@ -395,6 +444,72 @@ applies to every request, not just follow-ups.
   The extra DB work is negligible next to the LLM call already being paid for.
 - The rewrite call uses **structured outputs** so it reliably returns just a
   query string.
+
+### What the rewrite produces — and what is unproven
+
+The rewrite emits a standalone query, plus two extra retrieval branches:
+**keywords** (salient nouns for the lexical/sparse side) and **sub-queries**
+(only for genuinely multi-part questions). Every populated field becomes its own
+`prefetch` branch, RRF-fused, with the **original query always surviving fusion**
+— so a rewrite that drifts cannot retrieve worse than the raw query alone. The
+prompt forbids inventing product names, numbers or constraints, and tells the
+model to return the question unchanged when it is already standalone.
+
+**Cross-lingual is left to the dense side.** A translated branch was considered
+and dropped: BGE-M3 is multilingual, so dense retrieval should carry EN↔DE on its
+own. The sparse branch stays language-bound as a result, which is a known,
+accepted gap — worth revisiting if the eval harness shows cross-lingual recall
+lagging.
+
+**Keywords and sub-queries may well be noise.** Both are reasoned improvements,
+not measured ones — there is no corpus, no golden set and no recall@k yet, so
+neither can currently be shown to help. Keywords may add little over what the
+sparse encoder already extracts; sub-queries risk fragmenting a question one
+search would have answered. Both sit behind `REWRITE_KEYWORDS_ENABLED` and
+`REWRITE_SUB_QUERIES_ENABLED` precisely so they can be A/B'd and dropped once a
+minimal testing corpus exists. Disabling a flag removes the field from both the
+schema and the prompt, so a disabled branch costs no output tokens.
+
+### Safety verdict and rewrite share one call
+
+The rewrite call also returns a safety verdict (`app/rag/query_analysis.py`):
+`{safe, category, rewritten_query}` from a single structured-output request.
+
+**Why merged:** both jobs need the same input (question plus history) and both
+must run before retrieval. Two serial calls would put two round trips ahead of
+the first token, on a budget that §7.2 already identifies as tight. One call
+does both.
+
+**Why an LLM check on top of `app/guardrails.py`:** the regex heuristics there
+are trivially rephrased around, and they deliberately never block. A model
+judging intent in context is a much better signal — good enough to act on.
+
+**Fail closed.** Anything that leaves us without a usable verdict — API error,
+malformed JSON, a field of the wrong type — refuses the request rather than
+falling through to retrieval and generation. The parsing model is **strict**:
+pydantic would otherwise coerce `{"safe": "yes"}` into `True`, and a verdict we
+had to guess at is one we should not act on.
+
+The costs of that choice, taken deliberately:
+
+- **The classifier becomes a hard dependency.** An API blip now refuses the
+  request before retrieval, where previously only generation failed. The SDK's
+  default two retries on 429/5xx soften this, but it is a real availability
+  trade.
+- **False positives have no appeal path.** A wrongly-refused user can only
+  rephrase. The refusal is logged at WARNING with the category so the rate is
+  observable.
+- Refusals and failures are deliberately **different messages**: someone who
+  asked a legitimate question should not be told they misbehaved because we
+  broke. Both stream back as a normal 200 — they are content decisions, not
+  protocol errors.
+
+**The classifier is itself an injection target,** so the question and history are
+sanitised through `app/guardrails.py` before reaching it, and its system prompt
+states that a message asking to be marked safe is itself unsafe.
+
+**Not cached:** the classifier prompt is well under Haiku 4.5's 4096-token
+prompt-cache minimum, so a `cache_control` breakpoint would silently no-op.
 
 **Multi-turn is a nice-to-test, not a target.** History is supported, but
 multi-turn behaviour isn't a graded goal — the golden Q&A set is single-turn.
