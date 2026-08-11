@@ -22,6 +22,8 @@ warranties and are not extended by registration.
 | AH-CB2 | Two-metre network cable, shielded | 12 months | €9 |
 | AH-SM1 | Surface mounting box for the T3 | 24 months | €14 |
 
+![Figure 1: A repeater relays traffic for leaf nodes; capacity still belongs to the hub.](images/mesh-topologie.png)
+
 # Choosing between a repeater and a second hub
 
 A repeater extends the mesh; it does not add device capacity. A property that is

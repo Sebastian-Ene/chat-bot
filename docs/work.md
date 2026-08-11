@@ -13,9 +13,15 @@
 - ~~Add a project description for AI~~
 
 ## Backend
+- Ingestion trigger, split across the two services — workflow is upload docs, then call it
+    - Endpoint lives on the **ingester**, bound to the compose network only and never published to the host; `POST /api/ingest` on the api is a thin proxy
+    - Takes **no** directory argument: the root is a setting (`CORPUS_DIR`) on the ingester, so it cannot be pointed anywhere else on the host
+    - Shared credential (`INGEST_API_KEY`), **not** the page JWT; timing-safe comparison; added to `.env.example`
+    - Return 202 and run in the background; ingestion takes minutes and would time out a synchronous request
+    - Reject a second concurrent run with 409, and expose enough status to tell "running" from "finished"
 - Change `retrieve()` to return chunks with metadata, not `list[str]`
 - Retrieve on both original and rewritten query as separate `prefetch` branches, fused with RRF — `retrieve()` takes a `RetrievalQueries` value object carrying every branch; the mock ignores it
-- Run CPU-bound models (embedder, vision model) in a thread pool behind a bounded semaphore
+- Run the **query embedder** off the event loop, behind a bounded semaphore — it is CPU-bound and synchronous, and now the only such model left in the api container (ingestion's models moved to the ingester)
 - Produce a latency breakdown to present, not just pass/fail against 5s — raw per-request breakdown lands in `logs/performance.log`; the presentable summary comes with the eval harness
 - Document any additional security considerations
 
@@ -61,13 +67,50 @@
 - ~~Generate the later batch of 5 docs~~ (`corpus/docs-later/`) — new topics, no contradictions; 5 `batch: later` golden questions must be declined before ingestion and answered after
 
 ## RAG — Read (ingestion)
-- Write the module that loads and parses docs via Docling — must walk a directory tree recursively, picking up PDF/DOCX/HTML at any depth (see `corpus/docs-initial/{coverage,bulk}/`)
-- Image descriptions: use `PictureItem.captions` when present; generate with a vision model when absent, across all three formats
-- Build caption generation as our own pipeline stage
-- Record description provenance (`extracted` / `generated`) on each image
-- Cache generated captions by image hash
-- Ensure caption generation runs before chunking, writing captions back into the `DoclingDocument`
-- Support incremental ingestion via a content-hash manifest
+
+Lives in `app/rag/ingest/`. Produces an enriched `DoclingDocument` per document plus the manifest; chunking and indexing belong to RAG — Store.
+
+**Arising from the spikes — these were not in the original design**
+- HTML figures carry **no image bytes**: resolve the `<img src>` against the document's directory and load the file ourselves, or HTML figures can never be described
+- DOCX captions are **not associated** by Docling: decide whether to accept generation for every DOCX figure, or parse the DOCX XML for the caption paragraph
+- A PDF `caption` can be **OCR'd text from inside the image** rather than the real caption: decide whether to trust it as `extracted` or gate it (e.g. require a `Figure`/`Abbildung` prefix)
+- Write descriptions to `PictureItem.meta` (`PictureMeta.description`, `created_by` carries provenance) — `annotations` works but is deprecated in docling-core 2.91
+- Set `TORCHDYNAMO_DISABLE=1` inside the ingest module, before torch is imported — without a C compiler every conversion fails
+- `page_no` only ever populates for PDF; `pages` is 0 for DOCX and HTML
+- A page-spanning table arrives as **two** table objects, not one — relevant to the chunker's table handling
+
+**Discovery and manifest**
+- Recursive walk of a root directory for `.pdf`/`.docx`/`.html` at any depth, stable ordering (see `corpus/docs-initial/{coverage,bulk}/`)
+- `doc_id` = path relative to the corpus root; `doc_content_hash` = SHA-256 of file bytes
+- JSON manifest `doc_id → {hash, ingested_at, counts}`; unchanged hash skips the document
+- Write the manifest entry only **after** Store succeeds, so a crash mid-run cannot leave it claiming finished work
+- Detect documents that disappeared: delete their vectors and their manifest entries
+
+**Parse**
+- One Docling `DocumentConverter`, OCR on, table structure on, per-format options
+- Wrap in a `ParsedDocument` carrying `doc_id`, source format, page count and language hint
+
+**Image descriptions**
+- Caption-first: `PictureItem.captions` present → provenance `extracted`
+- Generate for the gaps as our own pipeline stage (Docling's enrichment is PDF-only), using Docling's default picture-description model
+- Record provenance `extracted` / `generated` per image
+- Cache generated captions by image hash, in a gitignored cache directory
+- Write descriptions back into the `DoclingDocument` **before** chunking
+- Revisit the captioner if the `image_only` golden questions fail: a generic caption ("a line chart") cannot answer qa-005, which needs the figure read factually. Claude vision is the fallback and the trigger is measured failure, not preference
+
+**Orchestration**
+- `python -m app.rag.ingest` over the `CORPUS_DIR` setting, with `--force` to bypass the manifest and `--dry-run` to report what would change
+- Per-document DEBUG trace plus a summary: documents processed/skipped/deleted, pictures seen, captions extracted vs generated
+- Keep Docling off the ingester's event loop too — its trigger endpoint must stay answerable while a run is in progress
+
+**Tests**
+- Unit: discovery, hashing, manifest round-trip, deletion detection, caption cache — fixtures only, no models
+- Integration over two real corpus files, marked and kept out of the default suite like `e2e`
+
+--- Done ---
+- ~~Spike: does `PictureItem.image` yield image bytes for DOCX and HTML?~~ (`scripts/spikes/docling_pictures.py`) — PDF yes, DOCX yes, **HTML no**; DOCX captions are never associated, and a PDF caption can be OCR'd in-image text
+- ~~Spike: how does a picture reach the chunker?~~ (`scripts/spikes/docling_chunking.py`) — pictures do become chunks (merged with surrounding prose), `contextualize()` prepends the heading path, and a description on `PictureItem.meta` reaches the chunk text
+- ~~Add a DOCX figure to the corpus~~ — no DOCX carried an image, so the format's description path was untestable; `accessory-catalogue-en.docx` now has a captioned figure and `troubleshooting-zeitplan-de.docx` an uncaptioned one
 
 ## RAG — Store
 - Chunk with `HybridChunker` (BGE-M3 tokenizer, `max_tokens` ~512, table header repeat on overflow)
@@ -96,8 +139,9 @@
 - ~~Do not use `output_config.effort` — it errors on Haiku 4.5~~
 
 ## Ops / Packaging
-- `docker-compose.yml`: backend service + Qdrant, no load balancer
-- Docker image builds via `uv`
+- `docker-compose.yml`: **api + ingester + qdrant**, no load balancer; the ingester's port is not published to the host
+- Corpus directory as a volume mounted by both api and ingester
+- Two images built via `uv` — the api excludes Docling entirely (it is ingest-only)
 - Bake model weights into the image at build time so first run is offline
 - Verify `docker compose up` gives a working app with no manual DB setup
 - Mount the container against the working tree in dev so `logs/` is written to the host and survives the container
@@ -121,7 +165,6 @@
 - Add 10 more large files > 15 pages to the corpus
 - Add a SQL DB to store sessions -> improve the security and also can track the usage data to create dashboards
 - Rate limiting on `/api/chat` — a refused message is kept out of the history, so an attacker retries from a clean conversation with no accumulating penalty
-- Verification spikes: `PictureItem.image` on DOCX/HTML; whether `HybridChunker` emits pictures as their own chunks
 
 ## Docs
 - Add diagram as code and use it to generate diagrams. One or more diagrams to handle overall arch, rag pipeline, detalied parts of the app

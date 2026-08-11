@@ -18,6 +18,8 @@ Uhrzeit oder hält eine andere Temperatur als eingestellt.
 - Der Zeitplan gehört zu einer anderen Zone als dem Raum, in dem gemessen wird.
 - Die Mindestzykluszeit verhindert ein sofortiges Wiedereinschalten.
 
+![](images/zeitplan-verlauf.png)
+
 # Zeitpläne haben keine Aus-Zeiten
 
 Ein Schaltpunkt gilt bis zum nächsten. Wer eine Absenkung über Nacht wünscht,

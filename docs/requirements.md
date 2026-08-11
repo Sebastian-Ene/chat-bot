@@ -125,9 +125,17 @@ because the PoC needs it.
 - Backend holds all AI, retrieval and orchestration logic; a frontend UI
   connects to it (required shape, per brief)
 - Vector DB must be local, not a managed cloud service
-- **Two containers** via `docker-compose` — backend (uvicorn + FastAPI, also
-  serving the frontend) and Qdrant. No load balancer. `docker compose up` must
-  produce a working app with no manual DB setup
+- **Three containers** via `docker-compose`, no load balancer:
+  - **api** — uvicorn + FastAPI, serves the frontend, embeds the query, searches
+    and generates
+  - **ingester** — owns Docling, chunking and index-time embedding; exposes the
+    ingest trigger on the compose network only, never published to the host
+  - **qdrant**
+  Ingestion is minutes of pinned CPU, so it does not share a container with the
+  request path. `docker compose up` must produce a working app with no manual DB
+  setup
+- The corpus directory is a volume mounted by both api and ingester. Index-time
+  and query-time embedding must use the same model
 - **Current state:** minimal FastAPI app (`app/main.py`, `app/routers/`) serving
   the chat UI, with mocked retrieval and completion (`app/rag/`). Real RAG not
   yet wired in
@@ -152,7 +160,12 @@ because the PoC needs it.
   - record provenance (`extracted` / `generated`) per description
   - cache generated captions by image hash
 - **Incremental ingestion:** adding documents must not reprocess the corpus.
-  Content-hash manifest per document; deterministic chunk IDs allow upserts
+  Content-hash manifest per document; deterministic chunk IDs allow upserts.
+  Documents that disappear have their vectors and manifest entries removed
+- **Where it runs:** `app/rag/ingest/`, invokable as `python -m app.rag.ingest`
+  and via `POST /api/ingest`. The endpoint takes **no** directory argument — the
+  root is the `CORPUS_DIR` setting, fixed at startup — and is protected by its
+  own `INGEST_API_KEY`, separate from the page token
 
 ### 6.2 Storage & Retrieval
 
@@ -268,6 +281,8 @@ quality. No specific metric mandated by the brief.
   **This is not authentication** — anyone who loads the page gets a token. It
   demonstrates the mechanism; see `docs/considerations.md` for what it does and
   does not buy
+- **Ingestion is not a public endpoint.** `POST /api/ingest` uses a separate
+  `INGEST_API_KEY` and names no path, so it cannot be aimed at arbitrary files
 
 ## 8. Testing
 

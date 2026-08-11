@@ -29,10 +29,26 @@ Original sketch:
     Nginx/AWS load balancer ->((server docker): uvicorn -> fastapi app )-> ( (db docker) vector db)
 
 **Superseded:** the Nginx/load-balancer tier was dropped as unnecessary for a
-PoC. The shipped shape is two containers via `docker-compose` — backend
-(uvicorn + FastAPI, also serving the frontend) and the vector DB — with no LB
-in front. Priority is a smooth install for another dev: `docker compose up`
-should bring up the app with the vector DB already configured (requirements §5).
+PoC. Priority is a smooth install for another dev: `docker compose up` should
+bring up the app with the vector DB already configured (requirements §5).
+
+### Ingestion runs in its own container
+
+Three containers: **api**, **ingester**, **qdrant**.
+
+Docling is needed only for ingestion — parsing and chunking both happen there,
+and no request path touches it. Ingestion is minutes of pinned CPU; sharing a
+container with the API means one ingestion run degrades every in-flight chat
+request, against a brief that mandates concurrent access and a 5 s completion
+target. Separating the processes answers that better than a semaphore does.
+
+The API keeps BGE-M3 for query embedding, so it is not a thin container — that
+is accepted. Index-time and query-time embedding must stay the same model, so a
+model change rolls out to both together.
+
+The ingest trigger lives on the **ingester**, on the compose network only, never
+published to the host; `POST /api/ingest` is a thin proxy carrying the shared
+internal key. The corpus directory is a volume both containers mount.
 
 ## Document corpus
 
@@ -87,7 +103,13 @@ LLM-as-parser (render pages to images, send to Claude vision).
   citations possible. Layout analysis plus dedicated table-structure
   recognition covers the PDF case. MIT licensed.
 - **Trade-off accepted:** ships ML models, so a bigger image and slower ingest.
-  Ingest is offline, so it never touches the 5s completion target.
+  Ingest is offline, so it never touches the 5s completion target. Measured: the
+  venv grows to **5.4 GB** with torch and transformers, before any model weights.
+
+**`TORCHDYNAMO_DISABLE=1` is required.** torch tries to JIT-compile through
+inductor/triton, which needs a C compiler; without one every conversion fails
+with `Failed to find C compiler`. Ingest is offline, so the eager path costs
+nothing that matters. Set it before torch is imported.
 
 Docling's `HybridChunker` also turned out to settle most of the chunking
 decision — see below.
@@ -149,6 +171,41 @@ integration.
   speeds is plausibly 30–60 minutes of ingest; re-running that every iteration
   would make development miserable, and hash-keyed caching fits the incremental
   ingestion design anyway.
+
+### Spike results — what Docling actually gives us
+
+Measured against the real corpus (`scripts/spikes/`), not assumed. Three findings
+contradict the design as written.
+
+| Format | Image bytes | Caption associated |
+|---|---|---|
+| PDF | yes (`get_image` → PIL) | yes, but see below |
+| DOCX | yes | **no** |
+| HTML | **no** (`image` unset) | no |
+
+- **HTML figures yield no pixels.** Docling finds the `PictureItem` but carries
+  no image, so caption generation cannot run for HTML through Docling. Resolving
+  the `<img src>` against the document's directory and reading the file ourselves
+  is the only route — a format-specific path in a deliberately unified parser.
+- **DOCX captions are not associated.** A visible "Figure 1: …" paragraph comes
+  back as `caption=''`, so every DOCX figure falls to the generation path
+  regardless of what the document says. Reading the DOCX XML ourselves is the
+  only fix, which is the second-parse complexity rejected for alt text.
+- **A PDF caption is not always the caption.** With OCR on, the wiring diagram
+  returned text from *inside the image* rather than its real caption. So
+  "captions non-empty" does not mean "the document captioned this figure", and
+  provenance `extracted` can silently record OCR output.
+
+Chunking behaves as hoped: pictures **do** reach the chunker (one `picture`
+chunk, merged with its surrounding prose), `contextualize()` prepends the heading
+path, and a description written onto the picture reaches the chunk text — so
+generated captions will be indexed. Write it to **`PictureItem.meta`**
+(`PictureMeta.description`, with `created_by` carrying provenance);
+`annotations` still works but is deprecated in docling-core 2.91.
+
+Two smaller consequences: `pages` is 0 for DOCX and HTML, so the `page_no`
+payload field only ever populates for PDF; and the page-spanning table arrives as
+**two** table objects rather than one.
 
 ### Image size
 

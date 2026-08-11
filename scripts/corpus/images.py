@@ -191,6 +191,61 @@ def webhook_delivery_diagram(path: Path) -> Path:
     return _save(fig, path)
 
 
+def mesh_topology_diagram(path: Path) -> Path:
+    """Captioned, used by the accessory catalogue (DOCX).
+
+    DOCX needs at least one captioned and one uncaptioned figure, or the
+    image-description path cannot be exercised for that format at all.
+    """
+    fig, ax = plt.subplots(figsize=(6.2, 3.0))
+    ax.set_xlim(0, 12)
+    ax.set_ylim(0, 5)
+    ax.axis("off")
+
+    ax.add_patch(Rectangle((0.5, 2.0), 2.0, 1.0, fill=False, linewidth=1.6, edgecolor=ACCENT))
+    ax.text(1.5, 2.5, "Hub H2", ha="center", va="center", fontsize=10, color=ACCENT)
+
+    ax.add_patch(Rectangle((5.0, 2.0), 2.0, 1.0, fill=False, linewidth=1.6, edgecolor=INK))
+    ax.text(6.0, 2.5, "Repeater", ha="center", va="center", fontsize=10, color=INK)
+
+    for label, y in (("Sensor S1", 3.9), ("Sensor S1", 2.5), ("Sensor S1", 1.1)):
+        ax.add_patch(Rectangle((9.4, y - 0.35), 2.1, 0.7, fill=False, linewidth=1.1, edgecolor="#777777"))
+        ax.text(10.45, y, label, ha="center", va="center", fontsize=8.5, color="#555555")
+        ax.add_patch(FancyArrowPatch((7.1, 2.5), (9.3, y), arrowstyle="-", color="#999999", linewidth=1.0))
+
+    ax.add_patch(FancyArrowPatch((2.6, 2.5), (4.9, 2.5), arrowstyle="-", color=INK, linewidth=1.3))
+    ax.text(3.75, 2.75, "mesh", ha="center", fontsize=8.5, color="#555555")
+    ax.text(
+        6.0, 0.35,
+        "A repeater extends range. It does not add device capacity — that needs a second hub.",
+        ha="center", fontsize=8.5, color=INK,
+    )
+    return _save(fig, path)
+
+
+def setpoint_timeline_chart(path: Path) -> Path:
+    """Uncaptioned, used by the German schedule troubleshooting article (DOCX).
+
+    Exercises the generated-caption path for the DOCX backend.
+    """
+    hours = list(range(0, 25))
+    setpoints = [17] * 6 + [21] * 3 + [18] * 8 + [21] * 4 + [17] * 4
+
+    fig, ax = plt.subplots(figsize=(6.2, 2.8))
+    ax.step(hours, setpoints, where="post", color=ACCENT, linewidth=1.8)
+    ax.set_xlabel("Uhrzeit")
+    ax.set_ylabel("Solltemperatur (°C)")
+    ax.set_xticks(range(0, 25, 3))
+    ax.set_yticks(range(16, 23))
+    ax.grid(True, linestyle=":", alpha=0.5)
+    ax.annotate(
+        "Absenkung 09:00–17:00",
+        xy=(13, 18), xytext=(9.5, 20.4),
+        arrowprops={"arrowstyle": "->", "color": INK}, fontsize=8.5,
+    )
+    return _save(fig, path)
+
+
 def build_all(images_dir: Path) -> dict[str, Path]:
     """Figures are build inputs: PDFs and DOCX embed them, HTML gets a copy."""
     return {
@@ -200,4 +255,6 @@ def build_all(images_dir: Path) -> dict[str, Path]:
         "energy": energy_savings_chart(images_dir / "energie-vergleich.png"),
         "automation": automation_flow_diagram(images_dir / "automation-flow.png"),
         "webhook": webhook_delivery_diagram(images_dir / "webhook-delivery.png"),
+        "mesh": mesh_topology_diagram(images_dir / "mesh-topologie.png"),
+        "setpoints": setpoint_timeline_chart(images_dir / "zeitplan-verlauf.png"),
     }
