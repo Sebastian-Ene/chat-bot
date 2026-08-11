@@ -13,6 +13,7 @@
 - ~~Add a project description for AI~~
 
 ## Backend
+- Remember to remove docling from the api container
 - Ingestion trigger, split across the two services — workflow is upload docs, then call it
     - Endpoint lives on the **ingester**, bound to the compose network only and never published to the host; `POST /api/ingest` on the api is a thin proxy
     - Takes **no** directory argument: the root is a setting (`CORPUS_DIR`) on the ingester, so it cannot be pointed anywhere else on the host
@@ -139,13 +140,19 @@ Lives in `app/rag/ingest/`. Produces an enriched `DoclingDocument` per document 
 - ~~Do not use `output_config.effort` — it errors on Haiku 4.5~~
 
 ## Ops / Packaging
-- `docker-compose.yml`: **api + ingester + qdrant**, no load balancer; the ingester's port is not published to the host
-- Corpus directory as a volume mounted by both api and ingester
-- Two images built via `uv` — the api excludes Docling entirely (it is ingest-only)
-- Bake model weights into the image at build time so first run is offline
-- Verify `docker compose up` gives a working app with no manual DB setup
-- Mount the container against the working tree in dev so `logs/` is written to the host and survives the container
+- Add the **ingester** service to `docker-compose.yml` once `app/rag/ingest/` exists — its port must not be published to the host; corpus directory as a volume for it
+- Split the dev-only bits (source mount, `--reload`) into an environment overlay when there is more than one environment
+- Re-verify `docker compose up` once the ingester and real retrieval are in
 - Package the whole project as a single zip for delivery
+
+--- Done ---
+- ~~Connect to Qdrant at api startup and fail fast if unreachable~~ (`app/vector_store.py`) — verified in the container: `qdrant connected url=http://qdrant:6333`
+- ~~`docker-compose.yml` with qdrant, no load balancer~~ — api + qdrant up and healthy, qdrant storage on a named volume
+- ~~Docker image builds via `uv`~~ (`Dockerfile.api`) — multi-stage, non-root, venv outside `/app` so the dev bind mount cannot shadow it
+- ~~Keep Docling out of the api image~~ — moved to an `ingest` dependency group; verified absent from the built image (375 MB)
+- ~~Mount the working tree in dev so logs land on the host~~ — `./app` and `./logs` bind-mounted, `--reload` enabled
+- ~~Model weights on a named cache volume~~ — downloaded once, survives container recreates
+- ~~Verify `docker compose up` gives a working app with no manual DB setup~~ — chat request from the host returned 200 with a real Claude reply, correlated to the container by request id
 
 ## Testing
 - Decide: how to demonstrate/measure answer accuracy and reliability

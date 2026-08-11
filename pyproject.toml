@@ -8,7 +8,7 @@ dependencies = [
     "pydantic-settings>=2.15.0",
     "anthropic>=0.116.0",
     "pyjwt>=2.13.0",
-    "docling>=2.119.0",
+    "qdrant-client>=1.19.0",
 ]
 
 [dependency-groups]
@@ -19,6 +19,17 @@ dev = [
     "python-docx>=1.2.0",
     "reportlab>=5.0.0",
 ]
+# Ingestion only. Docling drags in torch, transformers and the layout/OCR
+# models; the api image must carry none of it, so it lives in its own group
+# rather than in the main dependencies.
+ingest = [
+    "docling>=2.119.0",
+]
+
+[tool.uv]
+# Local development gets everything. The api image installs main dependencies
+# only, via `uv sync --no-default-groups`.
+default-groups = ["dev", "ingest"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

@@ -50,6 +50,22 @@ The ingest trigger lives on the **ingester**, on the compose network only, never
 published to the host; `POST /api/ingest` is a thin proxy carrying the shared
 internal key. The corpus directory is a volume both containers mount.
 
+The api image installs main dependencies only (`uv sync --no-default-groups`),
+so Docling, torch and transformers are absent from it — verified in the built
+image, which is 375 MB.
+
+### Source is bind-mounted in dev, baked into the image elsewhere
+
+The api container mounts `./app` and `./logs` from the host, so code is
+live-editable under `--reload` and logs are readable without entering the
+container.
+
+That is a **development** choice, not the shipping shape. An upper environment
+runs the code baked into the image — no source mount, no `--reload` — so what
+was tested is what runs and the container stays immutable. The mount and the
+reload flag therefore belong in an environment-specific compose overlay; the
+split is deferred while there is only one environment.
+
 ## Document corpus
 
 ### Generating the corpus — the self-set-exam trap
@@ -218,8 +234,8 @@ the smooth-install priority in requirements §5:
     picture-description VLM       0.5GB (default) .. 6GB (larger local model)
     torch (CPU)                   ~1GB
 
-Mitigation regardless of the final numbers: bake model weights into the image at
-build time so first run is fully offline and doesn't download at startup.
+Model weights live on a named cache volume, so they download once and survive
+container recreates.
 
 ## Retrieval stack
 

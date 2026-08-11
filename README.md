@@ -3,7 +3,17 @@
 ## Running
 
     cp .env.example .env      # then fill in ANTHROPIC_API_KEY and JWT_SECRET
+
+    docker compose up -d      # api on :8000, qdrant on :6333
+    docker compose logs -f api
+    docker compose down
+
+Or without Docker:
+
     ./run.sh                  # RELOAD=1 to restart on code changes
+
+`./app` and `./logs` are bind-mounted into the api container, so code changes
+reload and logs are readable on the host.
 
 ## Tests
 

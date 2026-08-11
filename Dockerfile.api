@@ -1,0 +1,50 @@
+# syntax=docker/dockerfile:1
+#
+# The api image. Deliberately excludes Docling and everything it drags in —
+# parsing and chunking belong to the ingester, and no request path touches them
+# (`uv sync --no-default-groups` installs main dependencies only).
+
+FROM python:3.14-slim AS base
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    # Outside /app so a bind-mounted working tree cannot shadow the venv.
+    UV_PROJECT_ENVIRONMENT=/opt/venv
+
+WORKDIR /app
+
+
+FROM base AS deps
+
+COPY pyproject.toml uv.lock ./
+# --no-install-project: dependencies only, so this layer is cached until the
+# lockfile changes rather than on every source edit.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-default-groups --no-install-project
+
+
+FROM base AS runtime
+
+COPY --from=deps /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY app ./app
+
+# /models is the mount point for the model-cache volume. It must exist with the
+# right ownership in the image: a named volume inherits the mount point's
+# ownership, and root-owned would make downloads fail for appuser.
+RUN useradd --create-home --uid 1000 appuser \
+    && mkdir -p /app/logs /models \
+    && chown -R appuser:appuser /app /models
+USER appuser
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/').read()"
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

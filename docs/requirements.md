@@ -124,7 +124,11 @@ because the PoC needs it.
 
 - Backend holds all AI, retrieval and orchestration logic; a frontend UI
   connects to it (required shape, per brief)
-- Vector DB must be local, not a managed cloud service
+- Vector DB must be local, not a managed cloud service. The api **fails to start**
+  if Qdrant is unreachable — `docker compose up` is the supported way to run the
+  project, and running outside it means providing Qdrant yourself
+- The `qdrant-client` version and the Qdrant image version are kept in step; the
+  client warns and may misbehave when they drift
 - **Three containers** via `docker-compose`, no load balancer:
   - **api** — uvicorn + FastAPI, serves the frontend, embeds the query, searches
     and generates

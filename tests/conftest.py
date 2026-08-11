@@ -11,6 +11,13 @@ os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
 # At least 32 bytes — PyJWT warns below that for HS256 (RFC 7518 §3.2).
 os.environ.setdefault("JWT_SECRET", "test-jwt-secret-long-enough-for-hs256")
 
+from app import vector_store  # noqa: E402
+
+# Startup fails hard when Qdrant is unreachable, and the e2e `live_server`
+# fixture runs the real lifespan. Stub it here so the suite stays hermetic — a
+# page test should not need a database.
+vector_store.check_connection = lambda: []
+
 from app.main import app  # noqa: E402
 from tests.fake_anthropic import FakeAnthropic  # noqa: E402
 
