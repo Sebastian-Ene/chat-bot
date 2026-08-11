@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Aurora Home — Release Notes 4.3</title>
+    <style>
+      body { font-family: Georgia, serif; max-width: 52rem; margin: 2rem auto; color: #1b1b1b; }
+      h1 { font-size: 1.8rem; }
+      h2 { font-size: 1.25rem; margin-top: 1.8rem; border-bottom: 1px solid #ddd; }
+      h3 { font-size: 1.05rem; }
+      .lede { color: #555; font-style: italic; }
+      .two-column { column-count: 2; column-gap: 2.5rem; }
+      figure img { width: 100%; max-width: 32rem; }
+      table { border-collapse: collapse; margin: 1rem 0; }
+      th, td { border: 1px solid #999; padding: .3rem .55rem; text-align: left; }
+      th { background: #e8e3d8; }
+      table.unruled th, table.unruled td { border: none; padding: .2rem 1.2rem .2rem 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Aurora Home — Release Notes 4.3</h1>
+    <p class="lede">Hub H2, Thermostat T3, Sensor S1 · released 24 March 2026</p>
+    <h2>Highlights</h2>
+    <p>Release 4.3 adds outbound webhooks, a maintenance window for staged updates, and a rewritten zone-averaging model. It is the first release to require a hub with at least 256 MB of memory; every H2 shipped since 2023 meets that.</p>
+    <h2>New</h2>
+    <ul><li>Outbound webhooks for state changes, documented in the integration guide.</li><li>A maintenance window setting: staged firmware updates only apply inside it.</li><li>Zone averaging can now be weighted per sensor rather than treating every sensor equally.</li><li>Schedules can be exported and re-imported as JSON, which finally makes a hub factory reset survivable.</li></ul>
+    <h2>Changed</h2>
+    <ul><li>The automation limit per property rises from 50 to 100.</li><li>Notification rate limiting is now per automation per minute, rather than per five minutes.</li><li>Holiday mode no longer clears a manual setpoint when it ends; the schedule resumes at the next setpoint instead.</li></ul>
+    <h2>Fixed</h2>
+    <ul><li>Weighted averaging previously ignored sensors reporting exactly at the setpoint.</li><li>A schedule copied between properties kept the source property's holiday dates.</li><li>The energy report double-counted the first day of a month for zones created mid-month.</li></ul>
+    <h2>Deprecations</h2>
+    <ul><li>CSV export of the energy report is deprecated in favour of the JSON export and will be removed in 4.5.</li><li>Support for firmware 3.x hubs ends with this release; 3.x hubs no longer receive security fixes.</li></ul>
+    <h2>Upgrade notes</h2>
+    <p>Set a maintenance window before upgrading a commercial installation, otherwise staged updates apply as soon as they arrive, which is the previous behaviour.</p>
+  </body>
+</html>

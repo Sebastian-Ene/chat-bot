@@ -4,3 +4,6 @@ __pycache__/
 .venv/
 .env
 logs/
+# Generated figures: build inputs. PDFs/DOCX embed them, and HTML documents get
+# their own copy in the output tree.
+scripts/corpus/images/

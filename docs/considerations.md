@@ -51,6 +51,17 @@ The same principle applies to the golden Q&A set: questions whose answers live
 only in a table or only in a chart image are the ones that prove the pipeline
 works.
 
+### Corpus size — ~25 documents
+
+Sized by what makes retrieval measurable. With 5 documents recall@5 is 100% by
+construction, so no retrieval decision can be evaluated; enough distractors to
+make the wrong chunk competitive is what sets the floor. Past ~25 is scale
+without new capability, and the effort is better spent on the eval harness.
+
+Hence two standards: coverage documents hand-authored, distractors authored as
+data through a shared renderer — with several structural variants, since one
+renderer for everything gives the corpus a single layout fingerprint.
+
 ## Document parsing
 
 ### Docling, unified across all three formats
@@ -195,7 +206,7 @@ Beyond that:
 **In fairness to Weaviate:** it is the more complete product — multi-tenancy,
 RBAC, replication, built-in vectorizer modules — and its single `alpha` knob is
 more ergonomic than composing prefetch clauses. None of that is load-bearing for
-a single-user PoC over 65 documents, and it is more surface area to configure
+a single-user PoC over a corpus this size, and it is more surface area to configure
 and to explain.
 
 **Gotcha to design around:** Qdrant point IDs must be unsigned integers or

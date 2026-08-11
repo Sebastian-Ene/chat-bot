@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Aurora Home — Release Notes 4.2</title>
+    <style>
+      body { font-family: Georgia, serif; max-width: 52rem; margin: 2rem auto; color: #1b1b1b; }
+      h1 { font-size: 1.8rem; }
+      h2 { font-size: 1.25rem; margin-top: 1.8rem; border-bottom: 1px solid #ddd; }
+      h3 { font-size: 1.05rem; }
+      .lede { color: #555; font-style: italic; }
+      .two-column { column-count: 2; column-gap: 2.5rem; }
+      figure img { width: 100%; max-width: 32rem; }
+      table { border-collapse: collapse; margin: 1rem 0; }
+      th, td { border: 1px solid #999; padding: .3rem .55rem; text-align: left; }
+      th { background: #e8e3d8; }
+      table.unruled th, table.unruled td { border: none; padding: .2rem 1.2rem .2rem 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Aurora Home — Release Notes 4.2</h1>
+    <p class="lede">Hub H2, Thermostat T3, Sensor S1 · released 14 January 2026</p>
+    <h2>Highlights</h2>
+    <p>Release 4.2 concentrates on mesh stability in large properties and on making schedules easier to reason about. It is a staged rollout: hubs check nightly and update themselves, and connected devices follow over the following days.</p>
+    <h2>New</h2>
+    <ul><li>Zone test now runs every zone in sequence from the app and reports which zones responded.</li><li>Holiday mode accepts a return date and clears itself automatically on that date.</li><li>Schedules can be copied between zones, including across properties on the same account.</li><li>The device list can be sorted by floor when a floor prefix is present in the name.</li></ul>
+    <h2>Changed</h2>
+    <ul><li>The minimum cycle time for heat-pump installations is now configurable between 5 and 30 minutes; the previous fixed value was 10 minutes.</li><li>Low-battery warnings fire at 2.6 V, raised from 2.5 V, to give more notice in cold rooms.</li><li>Pairing mode times out after 90 seconds instead of 60.</li></ul>
+    <h2>Fixed</h2>
+    <ul><li>A hub that lost its uplink during a firmware staging window could leave a device reporting an in-progress update indefinitely.</li><li>Renaming a zone no longer detaches its schedule.</li><li>Temperature offsets entered in Fahrenheit were stored without conversion on accounts created before 3.9.</li></ul>
+    <h2>Known issues</h2>
+    <ul><li>Sensors that have been offline for more than 30 days occasionally need to be re-paired rather than rejoining on their own.</li><li>The energy report understates consumption for the first partial month after installation.</li></ul>
+    <h2>Upgrade notes</h2>
+    <p>There is no rollback. Properties with more than forty devices should expect the mesh to re-converge over several hours after the hub restarts; this is normal and needs no intervention.</p>
+  </body>
+</html>
