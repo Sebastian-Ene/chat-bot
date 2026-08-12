@@ -3,7 +3,10 @@ __pycache__/
 .claude/settings.local.json
 .venv/
 .env
-logs/
+# Ignore the log files but keep the directories. The containers run as a
+# non-root user, and Docker creates a missing bind-mount source as root — so a
+# clone without these directories cannot start.
+logs/**/*.log*
 # Generated figures: build inputs. PDFs/DOCX embed them, and HTML documents get
 # their own copy in the output tree.
 scripts/corpus/images/

@@ -16,7 +16,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     get_settings()  # fail fast on missing or invalid configuration
-    configure_logging()
+    configure_logging("api")
     vector_store.check_connection()  # fail fast if the vector store is unreachable
     yield
 

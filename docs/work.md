@@ -13,11 +13,9 @@
 - ~~Add a project description for AI~~
 
 ## Backend
-- Remember to remove docling from the api container
-- Ingestion trigger, split across the two services — workflow is upload docs, then call it
+- Ingestion trigger, split across the two services — workflow is upload docs, then call it. in prod docs would probably be in an S3 bucket where we can hook on updates and call the ingest endpoint which is similar but different
     - Endpoint lives on the **ingester**, bound to the compose network only and never published to the host; `POST /api/ingest` on the api is a thin proxy
-    - Takes **no** directory argument: the root is a setting (`CORPUS_DIR`) on the ingester, so it cannot be pointed anywhere else on the host
-    - Shared credential (`INGEST_API_KEY`), **not** the page JWT; timing-safe comparison; added to `.env.example`
+    - Shared credential (`INGEST_API_KEY`), **not** the page JWT; timing-safe comparison; added to `.env.example`. Kept even though the ingester is unreachable from outside — network isolation says where a request came from, not whether it was meant; see `docs/considerations.md`
     - Return 202 and run in the background; ingestion takes minutes and would time out a synchronous request
     - Reject a second concurrent run with 409, and expose enough status to tell "running" from "finished"
 - Change `retrieve()` to return chunks with metadata, not `list[str]`
@@ -69,7 +67,7 @@
 
 ## RAG — Read (ingestion)
 
-Lives in `app/rag/ingest/`. Produces an enriched `DoclingDocument` per document plus the manifest; chunking and indexing belong to RAG — Store.
+Lives in `app/rag/ingest/`. Produces an enriched `DoclingDocument` per document; chunking and indexing belong to RAG — Store.
 
 **Arising from the spikes — these were not in the original design**
 - HTML figures carry **no image bytes**: resolve the `<img src>` against the document's directory and load the file ourselves, or HTML figures can never be described
@@ -80,12 +78,15 @@ Lives in `app/rag/ingest/`. Produces an enriched `DoclingDocument` per document 
 - `page_no` only ever populates for PDF; `pages` is 0 for DOCX and HTML
 - A page-spanning table arrives as **two** table objects, not one — relevant to the chunker's table handling
 
-**Discovery and manifest**
-- Recursive walk of a root directory for `.pdf`/`.docx`/`.html` at any depth, stable ordering (see `corpus/docs-initial/{coverage,bulk}/`)
-- `doc_id` = path relative to the corpus root; `doc_content_hash` = SHA-256 of file bytes
-- JSON manifest `doc_id → {hash, ingested_at, counts}`; unchanged hash skips the document
-- Write the manifest entry only **after** Store succeeds, so a crash mid-run cannot leave it claiming finished work
-- Detect documents that disappeared: delete their vectors and their manifest entries
+**Discovery and state**
+- Write all of a document's points in a **single upsert**, so it is atomically indexed at a given hash or not indexed at all — the plan depends on it
+- Act on the plan: index `new` + `changed`, skip `unchanged`, delete the vectors of `deleted`
+
+--- Done ---
+- ~~Recursive walk for `.pdf`/`.docx`/`.html` at any depth, stable ordering~~ (`app/rag/ingest/discovery.py`) — skips dotfiles and the golden answer key
+- ~~`doc_id` = path relative to the corpus root; `doc_content_hash` = SHA-256 of file bytes~~
+- ~~Work out what a run has to do~~ (`app/rag/ingest/state.py`) — read from the collection rather than a side file, so the record cannot disagree with the index; new/changed/unchanged/deleted, with a multi-hash document treated as a partial write and re-ingested
+- ~~Detect documents that disappeared~~ — they appear as `deleted` in the plan
 
 **Parse**
 - One Docling `DocumentConverter`, OCR on, table structure on, per-format options
@@ -100,12 +101,12 @@ Lives in `app/rag/ingest/`. Produces an enriched `DoclingDocument` per document 
 - Revisit the captioner if the `image_only` golden questions fail: a generic caption ("a line chart") cannot answer qa-005, which needs the figure read factually. Claude vision is the fallback and the trigger is measured failure, not preference
 
 **Orchestration**
-- `python -m app.rag.ingest` over the `CORPUS_DIR` setting, with `--force` to bypass the manifest and `--dry-run` to report what would change
+- `python -m app.rag.ingest` over the `CORPUS_DIR` setting, with `--force` to re-index regardless of the plan and `--dry-run` to print it and stop
 - Per-document DEBUG trace plus a summary: documents processed/skipped/deleted, pictures seen, captions extracted vs generated
 - Keep Docling off the ingester's event loop too — its trigger endpoint must stay answerable while a run is in progress
 
 **Tests**
-- Unit: discovery, hashing, manifest round-trip, deletion detection, caption cache — fixtures only, no models
+- Unit: caption cache — fixtures only, no models
 - Integration over two real corpus files, marked and kept out of the default suite like `e2e`
 
 --- Done ---
@@ -140,13 +141,13 @@ Lives in `app/rag/ingest/`. Produces an enriched `DoclingDocument` per document 
 - ~~Do not use `output_config.effort` — it errors on Haiku 4.5~~
 
 ## Ops / Packaging
-- Add the **ingester** service to `docker-compose.yml` once `app/rag/ingest/` exists — its port must not be published to the host; corpus directory as a volume for it
 - Split the dev-only bits (source mount, `--reload`) into an environment overlay when there is more than one environment
 - Re-verify `docker compose up` once the ingester and real retrieval are in
 - Package the whole project as a single zip for delivery
 
 --- Done ---
 - ~~Connect to Qdrant at api startup and fail fast if unreachable~~ (`app/vector_store.py`) — verified in the container: `qdrant connected url=http://qdrant:6333`
+- ~~Add the **ingester** service~~ (`Dockerfile.ingester`, `app/rag/ingest/service.py`) — verified: docling+torch present in the ingester and absent from the api, no host port mapping, `/corpus` read-only with all 20 documents visible, `model-cache` shared with the api, `POST /ingest` answers 501 until the pipeline exists
 - ~~`docker-compose.yml` with qdrant, no load balancer~~ — api + qdrant up and healthy, qdrant storage on a named volume
 - ~~Docker image builds via `uv`~~ (`Dockerfile.api`) — multi-stage, non-root, venv outside `/app` so the dev bind mount cannot shadow it
 - ~~Keep Docling out of the api image~~ — moved to an `ingest` dependency group; verified absent from the built image (375 MB)

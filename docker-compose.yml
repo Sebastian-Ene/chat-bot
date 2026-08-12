@@ -28,6 +28,7 @@ services:
     environment:
       # Service name on the compose network, not localhost.
       QDRANT_URL: http://qdrant:6333
+      # The service appends its own subdirectory — see configure_logging.
       LOG_DIR: /app/logs
       # Model weights land here, on a named volume, so they are downloaded once
       # rather than on every container recreate.
@@ -52,6 +53,31 @@ services:
       - --port
       - "8000"
       - --reload
+    depends_on:
+      qdrant:
+        condition: service_healthy
+
+  ingester:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingester
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      LOG_DIR: /app/logs
+      HF_HOME: /models/huggingface
+      CORPUS_DIR: /corpus
+    # No `ports:` — the trigger is reachable on the compose network only, never
+    # from the host. The api proxies to it.
+    volumes:
+      # The initial set is the ingestion root; the later batch is copied in here
+      # to demonstrate incremental ingestion. Read-only: the ingester parses
+      # documents, it never writes them.
+      - ./corpus/docs-initial:/corpus:ro
+      - ./app:/app/app
+      - ./logs:/app/logs
+      - model-cache:/models
     depends_on:
       qdrant:
         condition: service_healthy

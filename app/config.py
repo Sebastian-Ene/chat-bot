@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr
     anthropic_model: str = "claude-haiku-4-5"
     qdrant_url: str = "http://localhost:6333"
+    qdrant_collection: str = "chunks"
 
     # One secret for the whole app, supplied via `.env`. Every process that
     # serves the app must share it, or tokens minted by one are rejected by
@@ -33,6 +34,11 @@ class Settings(BaseSettings):
     # off to A/B against the eval harness once a corpus exists.
     rewrite_keywords_enabled: bool = True
     rewrite_sub_queries_enabled: bool = True
+
+    # Ingestion root, walked recursively. Deliberately the initial set rather
+    # than all of `corpus/`: the later batch is copied in to demonstrate
+    # incremental ingestion, and the golden answer key stays outside the tree.
+    corpus_dir: Path = Path("corpus/docs-initial")
 
     # DEBUG by default: per-stage timings are only measured at this level, and
     # this is a PoC whose latency breakdown is a deliverable.

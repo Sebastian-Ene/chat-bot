@@ -36,4 +36,5 @@ pythonpath = ["."]
 addopts = "-m 'not e2e'"
 markers = [
     "e2e: browser-driven Playwright tests. Run separately (`uv run pytest -m e2e`) — mixing them with anyio-marked tests in the same process breaks anyio's asyncio runner.",
+    "ingest: ingestion pipeline tests (`uv run pytest -m ingest`, or `pytest tests/ingest`). In the default run while they stay fast; the Docling ones will need excluding once they exist. Note a command-line `-m` replaces the `not e2e` in addopts, so exclusions must be spelled out in full: `-m 'not e2e and not ingest'`.",
 ]

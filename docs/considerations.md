@@ -321,7 +321,7 @@ reason was code simplicity rather than quality.
 Note for a possible later comparison: switching embedder changes the vector
 dimension (BGE-M3 is 1024-dim), which means recreating the Qdrant collection
 rather than migrating it in place. Keeping the embedder behind an interface and
-recording model name + dimension in the ingest manifest makes that swap cheap;
+recording model name + dimension alongside the index makes that swap cheap;
 Qdrant's named vectors would allow A/B-ing two embedders over one ingest.
 
 ### Chunking — HybridChunker, ~512 tokens, neighbour expansion
@@ -657,6 +657,24 @@ stdout to a log collector instead of reading files off a volume.
 credentials in source, satisfying the brief's mandatory requirement. `.env` must
 be gitignored with a placeholder `.env.example` committed in its place. In
 production this would be a secrets manager rather than a file on disk.
+
+### Ingestion is protected in layers, not by one control
+
+The ingester is unreachable from outside — no published port — and it still
+requires `INGEST_API_KEY`. That is deliberate: network isolation is a perimeter,
+not an authorisation. It says where a request came from, never whether it was
+meant. Anything already inside the network — a compromised api, a future
+service, a misrouted call — would otherwise be able to trigger ingestion.
+
+The layers, each covering a different failure of the others:
+
+- **Not routable from outside** — stops the internet.
+- **Shared secret on the trigger** — stops anything inside the network that
+  isn't the api.
+- **No path argument**, the root is fixed at startup — a stolen key still cannot
+  aim ingestion at arbitrary files on the host.
+- **Corpus mounted read-only** — a compromised ingester cannot alter the
+  documents it indexes.
 
 ### API tokens — a demonstration, not authentication
 

@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1
+#
+# The ingester image. Carries Docling and everything it drags in — torch,
+# transformers, the layout/table models and OCR — which is exactly why it is a
+# separate image from the api. Expect several GB.
+
+FROM python:3.14-slim AS base
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    # Outside /app so a bind-mounted working tree cannot shadow the venv.
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    # torch JIT-compiles through inductor/triton, which needs a C compiler that
+    # is not here. Ingest is offline, so the eager path costs nothing that
+    # matters — without this, every conversion fails.
+    TORCHDYNAMO_DISABLE=1
+
+WORKDIR /app
+
+
+FROM base AS deps
+
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-default-groups --group ingest --no-install-project
+
+
+FROM base AS runtime
+
+COPY --from=deps /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY app ./app
+
+# /models and /corpus are volume mount points: a named volume inherits the
+# mount point's ownership, and root-owned would break the non-root user.
+RUN useradd --create-home --uid 1000 appuser \
+    && mkdir -p /app/logs /models /corpus \
+    && chown -R appuser:appuser /app /models /corpus
+USER appuser
+
+EXPOSE 8001
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health').read()"
+
+CMD ["uvicorn", "app.rag.ingest.service:service", "--host", "0.0.0.0", "--port", "8001"]
