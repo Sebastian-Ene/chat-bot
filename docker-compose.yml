@@ -1,5 +1,5 @@
-# Local development stack. The ingester service joins this once
-# `app/rag/ingest/` exists — see docs/work.md.
+# Local development stack: api + qdrant as long-running services, ingestion as a
+# one-shot job behind the `ingest` profile — see docs/work.md.
 services:
   qdrant:
     # Keep in step with `qdrant-client` in pyproject.toml: the client warns and
@@ -57,19 +57,25 @@ services:
       qdrant:
         condition: service_healthy
 
-  ingester:
+  # A job, not a service: it runs the pipeline to completion and exits.
+  #
+  #   docker compose run --rm ingest              # ingest what changed
+  #   docker compose run --rm ingest --dry-run    # show the plan, do nothing
+  #
+  # The `ingest` profile keeps it out of `docker compose up`, which would
+  # otherwise start it on every stack boot.
+  ingest:
+    profiles: ["ingest"]
     build:
       context: .
       dockerfile: Dockerfile.ingester
-    restart: unless-stopped
     env_file: .env
     environment:
       QDRANT_URL: http://qdrant:6333
       LOG_DIR: /app/logs
-      HF_HOME: /models/huggingface
       CORPUS_DIR: /corpus
-    # No `ports:` — the trigger is reachable on the compose network only, never
-    # from the host. The api proxies to it.
+      # No HF_HOME and no model cache volume here: the ingester's models are
+      # baked into its image, and a volume mounted over them would hide them.
     volumes:
       # The initial set is the ingestion root; the later batch is copied in here
       # to demonstrate incremental ingestion. Read-only: the ingester parses
@@ -77,7 +83,6 @@ services:
       - ./corpus/docs-initial:/corpus:ro
       - ./app:/app/app
       - ./logs:/app/logs
-      - model-cache:/models
     depends_on:
       qdrant:
         condition: service_healthy

@@ -12,8 +12,11 @@ logs/
 chat-logs/
 .pytest_cache/
 
-# Generated documents are mounted as a volume, not baked into the image.
+# Generated documents are mounted as a volume, not baked into the image. The one
+# exception is the document the ingester build converts to pull its models down;
+# it is deleted in the same layer.
 corpus/
+!corpus/docs-initial/bulk/release-notes-4-1-de.pdf
 
 docs/
 tests/

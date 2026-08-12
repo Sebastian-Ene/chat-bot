@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1
 #
-# The ingester image. Carries Docling and everything it drags in — torch,
-# transformers, the layout/table models and OCR — which is exactly why it is a
-# separate image from the api. Expect several GB.
+# The ingester image — a one-shot job, run with `docker compose run --rm ingest`.
+# Carries Docling and everything it drags in — torch, transformers, the
+# layout/table models and OCR — which is exactly why it is a separate image from
+# the api. Expect several GB.
 
 FROM python:3.14-slim AS base
 
@@ -31,21 +32,43 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM base AS runtime
 
+# Docling's PDF backend pulls in opencv-python, which links against X11 shared
+# libraries that the slim image does not carry. Without these every PDF fails to
+# convert with `ImportError: libxcb.so.1`; DOCX and HTML are unaffected, so the
+# gap shows up as a partially indexed corpus rather than an obvious break.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libxcb1 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=deps /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY app ./app
 
-# /models and /corpus are volume mount points: a named volume inherits the
-# mount point's ownership, and root-owned would break the non-root user.
+# Models are baked into the image rather than fetched on first use: the image
+# digest then fully determines what the OCR and layout stages do, replicas start
+# without racing each other to download, and nothing inside the runtime
+# filesystem needs to be writable. Deliberately NOT under /models — that is a
+# volume mount point, and a mounted volume would shadow whatever the image
+# carries there.
+ENV HF_HOME=/opt/models/huggingface
+
+# Warm the converter on a real document: that is the only way to be sure every
+# model the runtime path asks for (layout, table structure, and RapidOCR's
+# weights plus its character dictionary) is actually present.
+COPY corpus/docs-initial/bulk/release-notes-4-1-de.pdf /tmp/warmup.pdf
+RUN python -c "from app.rag.ingest.parse import get_converter; get_converter().convert('/tmp/warmup.pdf')" \
+    && rm /tmp/warmup.pdf
+
+# /corpus is a volume mount point: a named volume inherits the mount point's
+# ownership, and root-owned would break the non-root user. The model directories
+# stay root-owned — they are read-only at runtime, which is the point.
 RUN useradd --create-home --uid 1000 appuser \
-    && mkdir -p /app/logs /models /corpus \
-    && chown -R appuser:appuser /app /models /corpus
+    && mkdir -p /app/logs /corpus \
+    && chown -R appuser:appuser /app /corpus
 USER appuser
 
-EXPOSE 8001
-
-HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health').read()"
-
-CMD ["uvicorn", "app.rag.ingest.service:service", "--host", "0.0.0.0", "--port", "8001"]
+# A job, not a service: it runs to completion and exits, so there is no port, no
+# healthcheck and no server. The exit code is the result — non-zero if any
+# document failed to parse.
+ENTRYPOINT ["python", "-m", "app.rag.ingest"]

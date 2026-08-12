@@ -129,17 +129,17 @@ because the PoC needs it.
   project, and running outside it means providing Qdrant yourself
 - The `qdrant-client` version and the Qdrant image version are kept in step; the
   client warns and may misbehave when they drift
-- **Three containers** via `docker-compose`, no load balancer:
+- **Two long-running services plus a job** via `docker-compose`, no load balancer:
   - **api** — uvicorn + FastAPI, serves the frontend, embeds the query, searches
     and generates
-  - **ingester** — owns Docling, chunking and index-time embedding; exposes the
-    ingest trigger on the compose network only, never published to the host
   - **qdrant**
+  - **ingest** — a one-shot job (`docker compose run --rm ingest`) owning
+    Docling, chunking and index-time embedding
   Ingestion is minutes of pinned CPU, so it does not share a container with the
   request path. `docker compose up` must produce a working app with no manual DB
   setup
-- The corpus directory is a volume mounted by both api and ingester. Index-time
-  and query-time embedding must use the same model
+- The corpus directory is a volume mounted by the api and the ingest job.
+  Index-time and query-time embedding must use the same model
 - **Current state:** minimal FastAPI app (`app/main.py`, `app/routers/`) serving
   the chat UI, with mocked retrieval and completion (`app/rag/`). Real RAG not
   yet wired in
@@ -169,10 +169,10 @@ because the PoC needs it.
   chunk IDs allow upserts, and all of a document's points are written in one
   upsert so it is atomically indexed or not. Documents that disappear have their
   vectors removed
-- **Where it runs:** `app/rag/ingest/`, invokable as `python -m app.rag.ingest`
-  and via `POST /api/ingest`. The endpoint takes **no** directory argument — the
-  root is the `CORPUS_DIR` setting, fixed at startup — and is protected by its
-  own `INGEST_API_KEY`, separate from the page token
+- **Where it runs:** `app/rag/ingest/`, as a batch job — `python -m
+  app.rag.ingest`, or `docker compose run --rm ingest`. It takes **no** directory
+  argument: the root is the `CORPUS_DIR` setting, fixed at startup, so a run
+  cannot be aimed at arbitrary files on the host
 
 ### 6.2 Storage & Retrieval
 
@@ -288,10 +288,10 @@ quality. No specific metric mandated by the brief.
   **This is not authentication** — anyone who loads the page gets a token. It
   demonstrates the mechanism; see `docs/considerations.md` for what it does and
   does not buy
-- **Ingestion is protected in layers**: the ingester is not routable from
-  outside, its trigger still requires `INGEST_API_KEY`, it names no path (the
-  root is fixed at startup), and the corpus is mounted read-only. Each layer
-  covers a different failure of the others — see `docs/considerations.md`
+- **Ingestion has no network surface at all**: it is a job started by whoever
+  can already run containers, not an endpoint. It names no path (the root is
+  fixed at startup) and the corpus is mounted read-only — see
+  `docs/considerations.md`
 
 ## 8. Testing
 

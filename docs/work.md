@@ -13,11 +13,6 @@
 - ~~Add a project description for AI~~
 
 ## Backend
-- Ingestion trigger, split across the two services — workflow is upload docs, then call it. in prod docs would probably be in an S3 bucket where we can hook on updates and call the ingest endpoint which is similar but different
-    - Endpoint lives on the **ingester**, bound to the compose network only and never published to the host; `POST /api/ingest` on the api is a thin proxy
-    - Shared credential (`INGEST_API_KEY`), **not** the page JWT; timing-safe comparison; added to `.env.example`. Kept even though the ingester is unreachable from outside — network isolation says where a request came from, not whether it was meant; see `docs/considerations.md`
-    - Return 202 and run in the background; ingestion takes minutes and would time out a synchronous request
-    - Reject a second concurrent run with 409, and expose enough status to tell "running" from "finished"
 - Change `retrieve()` to return chunks with metadata, not `list[str]`
 - Retrieve on both original and rewritten query as separate `prefetch` branches, fused with RRF — `retrieve()` takes a `RetrievalQueries` value object carrying every branch; the mock ignores it
 - Run the **query embedder** off the event loop, behind a bounded semaphore — it is CPU-bound and synchronous, and now the only such model left in the api container (ingestion's models moved to the ingester)
@@ -89,10 +84,14 @@ Lives in `app/rag/ingest/`. Produces an enriched `DoclingDocument` per document;
 - ~~Detect documents that disappeared~~ — they appear as `deleted` in the plan
 
 **Parse**
-- One Docling `DocumentConverter`, OCR on, table structure on, per-format options
-- Wrap in a `ParsedDocument` carrying `doc_id`, source format, page count and language hint
 
-**Image descriptions**
+--- Done ---
+- ~~One Docling `DocumentConverter`, OCR on, table structure on, per-format options~~ (`app/rag/ingest/parse.py`) — built once per process; `generate_picture_images` on, or figure images are discarded and the caption stage has nothing to work with
+- ~~Wrap in a `ParsedDocument`~~ — `doc_id`, source format, content hash, page/table/picture counts and parse duration
+- ~~A document that fails to convert is logged at ERROR and skipped~~ — one malformed file must not block the corpus; it stays un-indexed and is retried next run. **Production would alert on these ERROR lines** so a document that never parses cannot fail silently
+- ~~No `lang` field~~ — nothing supplies it for free and BGE-M3 is multilingual, so retrieval does not need it
+
+**Image descriptions** — *deferred, revisit after the pipeline is end-to-end.* Text and tables carry most of the corpus; images are an improvement on top, and every item below (plus the three spike findings about HTML bytes, DOCX captions and OCR'd PDF captions) waits for that pass. The `image_only` golden questions are expected to fail until then.
 - Caption-first: `PictureItem.captions` present → provenance `extracted`
 - Generate for the gaps as our own pipeline stage (Docling's enrichment is PDF-only), using Docling's default picture-description model
 - Record provenance `extracted` / `generated` per image
@@ -101,9 +100,14 @@ Lives in `app/rag/ingest/`. Produces an enriched `DoclingDocument` per document;
 - Revisit the captioner if the `image_only` golden questions fail: a generic caption ("a line chart") cannot answer qa-005, which needs the figure read factually. Claude vision is the fallback and the trigger is measured failure, not preference
 
 **Orchestration**
-- `python -m app.rag.ingest` over the `CORPUS_DIR` setting, with `--force` to re-index regardless of the plan and `--dry-run` to print it and stop
-- Per-document DEBUG trace plus a summary: documents processed/skipped/deleted, pictures seen, captions extracted vs generated
-- Keep Docling off the ingester's event loop too — its trigger endpoint must stay answerable while a run is in progress
+- Extend the run summary with picture counts and captions extracted vs generated once the image stage exists
+
+--- Done ---
+- ~~Ingestion is a **job, not a service**~~ — it runs to completion, is started by an operator or a schedule, and takes minutes; that is a batch job, and it needs no network surface at all
+- ~~`run()` ties discovery, plan and parse together~~ (`app/rag/ingest/runner.py`) — returns a `RunReport`; indexing and vector deletion are a marked seam for RAG — Store, and the report does not claim documents were indexed
+- ~~`python -m app.rag.ingest` over the `CORPUS_DIR` setting~~ (`app/rag/ingest/__main__.py`) — `--force` re-processes everything, `--dry-run` prints the plan and stops. No directory argument: the root is a setting, so a run cannot be aimed at arbitrary host files
+- ~~Exit non-zero when a document failed to parse~~ — a scheduled run must not report success over a partially indexed corpus
+- ~~The ingester container is a one-shot job~~ — `docker compose run --rm ingest`, behind an `ingest` profile so `docker compose up` does not start it; no port, no healthcheck, no server
 
 **Tests**
 - Unit: caption cache — fixtures only, no models
@@ -141,18 +145,19 @@ Lives in `app/rag/ingest/`. Produces an enriched `DoclingDocument` per document;
 - ~~Do not use `output_config.effort` — it errors on Haiku 4.5~~
 
 ## Ops / Packaging
+- **Revisit the Docker approach as a whole** once the pipeline is implemented. Open points: the ingester bakes its models into the image while the api still uses a cache volume, so the two services follow different strategies; nothing asserts the baked models are present, so a base-image change could silently reintroduce a runtime download; and the ~8 min ingester build is slow to iterate on
 - Split the dev-only bits (source mount, `--reload`) into an environment overlay when there is more than one environment
 - Re-verify `docker compose up` once the ingester and real retrieval are in
 - Package the whole project as a single zip for delivery
 
 --- Done ---
 - ~~Connect to Qdrant at api startup and fail fast if unreachable~~ (`app/vector_store.py`) — verified in the container: `qdrant connected url=http://qdrant:6333`
-- ~~Add the **ingester** service~~ (`Dockerfile.ingester`, `app/rag/ingest/service.py`) — verified: docling+torch present in the ingester and absent from the api, no host port mapping, `/corpus` read-only with all 20 documents visible, `model-cache` shared with the api, `POST /ingest` answers 501 until the pipeline exists
+- ~~Add the **ingester** service~~ (`Dockerfile.ingester`, `app/rag/ingest/service.py`) — verified: docling+torch present in the ingester and absent from the api, no host port mapping, `/corpus` read-only with all 20 documents visible, `POST /ingest` answers 501 until the pipeline exists
 - ~~`docker-compose.yml` with qdrant, no load balancer~~ — api + qdrant up and healthy, qdrant storage on a named volume
 - ~~Docker image builds via `uv`~~ (`Dockerfile.api`) — multi-stage, non-root, venv outside `/app` so the dev bind mount cannot shadow it
 - ~~Keep Docling out of the api image~~ — moved to an `ingest` dependency group; verified absent from the built image (375 MB)
 - ~~Mount the working tree in dev so logs land on the host~~ — `./app` and `./logs` bind-mounted, `--reload` enabled
-- ~~Model weights on a named cache volume~~ — downloaded once, survives container recreates
+- ~~Model weights out of the request path~~ — the ingester bakes them into its image (immutable, no runtime download, read-only at runtime); the api keeps a named cache volume for the embedder it will need
 - ~~Verify `docker compose up` gives a working app with no manual DB setup~~ — chat request from the host returned 200 with a real Claude reply, correlated to the container by request id
 
 ## Testing

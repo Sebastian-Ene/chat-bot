@@ -8,10 +8,19 @@
     docker compose logs -f api
     docker compose down
 
-The ingester runs alongside them but is not published to the host — it is
-reachable only from inside the compose network. It reads `corpus/docs-initial`
-read-only; copying `corpus/docs-later/*` in there is how incremental ingestion
-gets demonstrated.
+## Ingestion
+
+A job, not a service — it runs to completion and exits, so `docker compose up`
+does not start it:
+
+    docker compose run --rm ingest --dry-run   # what a run would do
+    docker compose run --rm ingest             # ingest what changed
+    docker compose run --rm ingest --force     # re-process everything
+
+It reads `corpus/docs-initial` read-only, and takes no directory argument — the
+root is the `CORPUS_DIR` setting. Copying `corpus/docs-later/*` in there and
+running it again is how incremental ingestion gets demonstrated. Exit status is
+non-zero if any document failed to parse.
 
 Or without Docker:
 
@@ -41,9 +50,9 @@ two processes rotating the same file race each other.
   by the id returned in the `X-Request-ID` response header.
 - `logs/api/performance.log` — one line per request with the per-stage latency
   breakdown and token usage.
-- `logs/ingest/ingest.log` — ingestion runs: documents discovered and the plan
-  (new / changed / unchanged / deleted).
-- `logs/ingest/app.log` — the ingester's own startup and framework logs.
+- `logs/ingest/ingest.log` — ingestion runs: the plan (new / changed /
+  unchanged / deleted), one line per document parsed, and the run summary.
+- `logs/ingest/app.log` — the ingest job's framework logs.
 
 The directories are tracked (the log files are not): the containers run as a
 non-root user, and Docker creates a missing bind-mount source as root, so a

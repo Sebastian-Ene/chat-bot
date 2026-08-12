@@ -32,9 +32,9 @@ Original sketch:
 PoC. Priority is a smooth install for another dev: `docker compose up` should
 bring up the app with the vector DB already configured (requirements §5).
 
-### Ingestion runs in its own container
+### Ingestion runs in its own container, as a job
 
-Three containers: **api**, **ingester**, **qdrant**.
+Two services — **api** and **qdrant** — plus an **ingest** job.
 
 Docling is needed only for ingestion — parsing and chunking both happen there,
 and no request path touches it. Ingestion is minutes of pinned CPU; sharing a
@@ -46,9 +46,14 @@ The API keeps BGE-M3 for query embedding, so it is not a thin container — that
 is accepted. Index-time and query-time embedding must stay the same model, so a
 model change rolls out to both together.
 
-The ingest trigger lives on the **ingester**, on the compose network only, never
-published to the host; `POST /api/ingest` is a thin proxy carrying the shared
-internal key. The corpus directory is a volume both containers mount.
+**Ingestion is a job, not a service** — `docker compose run --rm ingest`. It
+runs to completion, is started by an operator or a schedule, and takes minutes;
+nothing remote needs to start a run, since documents arrive by being placed in
+the corpus directory and whoever can do that can run a container. In production
+the documents would more likely sit in object storage, with the run started by
+an update hook.
+
+The corpus directory is a volume mounted by the api and the job.
 
 The api image installs main dependencies only (`uv sync --no-default-groups`),
 so Docling, torch and transformers are absent from it — verified in the built
@@ -658,23 +663,17 @@ credentials in source, satisfying the brief's mandatory requirement. `.env` must
 be gitignored with a placeholder `.env.example` committed in its place. In
 production this would be a secrets manager rather than a file on disk.
 
-### Ingestion is protected in layers, not by one control
+### Ingestion has no network surface to defend
 
-The ingester is unreachable from outside — no published port — and it still
-requires `INGEST_API_KEY`. That is deliberate: network isolation is a perimeter,
-not an authorisation. It says where a request came from, never whether it was
-meant. Anything already inside the network — a compromised api, a future
-service, a misrouted call — would otherwise be able to trigger ingestion.
+Nothing listens, so there is nothing to authenticate, rate-limit or lock.
+Starting a run requires the ability to run a container — already a higher
+privilege than any credential we could have issued for it.
 
-The layers, each covering a different failure of the others:
+What remains:
 
-- **Not routable from outside** — stops the internet.
-- **Shared secret on the trigger** — stops anything inside the network that
-  isn't the api.
-- **No path argument**, the root is fixed at startup — a stolen key still cannot
-  aim ingestion at arbitrary files on the host.
-- **Corpus mounted read-only** — a compromised ingester cannot alter the
-  documents it indexes.
+- **No path argument** — the root is the `CORPUS_DIR` setting, fixed at startup,
+  so a run cannot be aimed at arbitrary files on the host.
+- **Corpus mounted read-only** — the job parses documents, it never writes them.
 
 ### API tokens — a demonstration, not authentication
 
