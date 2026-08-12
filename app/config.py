@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     # incremental ingestion, and the golden answer key stays outside the tree.
     corpus_dir: Path = Path("corpus/docs-initial")
 
+    # One model for both index-time and query-time embedding — they must never
+    # drift, so this setting feeds the chunker's tokenizer and the embedder
+    # alike. Chunks are sized in BGE-M3's own tokens; 512 rather than its 8192
+    # ceiling, because a large chunk dilutes the embedding and costs precision.
+    embedding_model: str = "BAAI/bge-m3"
+    chunk_max_tokens: int = 512
+
     # DEBUG by default: per-stage timings are only measured at this level, and
     # this is a PoC whose latency breakdown is a deliverable.
     log_level: str = "DEBUG"

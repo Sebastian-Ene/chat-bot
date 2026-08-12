@@ -53,11 +53,16 @@ COPY app ./app
 # carries there.
 ENV HF_HOME=/opt/models/huggingface
 
-# Warm the converter on a real document: that is the only way to be sure every
-# model the runtime path asks for (layout, table structure, and RapidOCR's
-# weights plus its character dictionary) is actually present.
+# Warm the converter on a real document, and the chunker's tokenizer alongside
+# it: converting is the only way to be sure every model the runtime path asks
+# for (layout, table structure, and RapidOCR's weights plus its character
+# dictionary) is actually present.
 COPY corpus/docs-initial/bulk/release-notes-4-1-de.pdf /tmp/warmup.pdf
-RUN python -c "from app.rag.ingest.parse import get_converter; get_converter().convert('/tmp/warmup.pdf')" \
+RUN python -c "\
+from app.rag.ingest.parse import get_converter; \
+from app.rag.ingest.chunk import get_chunker; \
+get_converter().convert('/tmp/warmup.pdf'); \
+get_chunker()" \
     && rm /tmp/warmup.pdf
 
 # /corpus is a volume mount point: a named volume inherits the mount point's

@@ -119,14 +119,18 @@ Lives in `app/rag/ingest/`. Produces an enriched `DoclingDocument` per document;
 - ~~Add a DOCX figure to the corpus~~ — no DOCX carried an image, so the format's description path was untestable; `accessory-catalogue-en.docx` now has a captioned figure and `troubleshooting-zeitplan-de.docx` an uncaptioned one
 
 ## RAG — Store
-- Chunk with `HybridChunker` (BGE-M3 tokenizer, `max_tokens` ~512, table header repeat on overflow)
-- Embed `contextualize()` output; store raw chunk text separately for display
 - Set up the Qdrant collection: named dense + sparse vectors sized for BGE-M3
 - Derive point IDs as `uuid5(doc_id, chunk_index)`
 - Store chunk payload: `doc_id`, `chunk_index`, `parent_id`, `page_no(s)`, `heading_path`, `element_types`, `lang`, `source_format`, `caption_provenance`, `doc_content_hash`
 - Implement hybrid retrieval via the Query API (`prefetch` dense + sparse, RRF fusion)
 - Implement neighbour expansion: fetch siblings by payload filter on (`doc_id`, `chunk_index` range), merge overlapping windows, clamp to `parent_id`
 - Use Qdrant's embedded mode (`:memory:` / local path) in unit tests
+
+--- Done ---
+- ~~Chunk with `HybridChunker`~~ (`app/rag/ingest/chunk.py`) — BGE-M3's own tokenizer at `max_tokens=512`, table header repeated on overflow, peers merged. The tokenizer must be the embedder's: a chunk sized in someone else's tokens overflows silently at embed time
+- ~~Embed `contextualize()` output, keep the raw text separately~~ — `embed_text` carries the heading path so a chunk is findable by its section; `text` is what reaches the LLM and the citation, since heading breadcrumbs in the prompt end up in the answer
+- ~~Corpus baseline~~ — 20 documents → **207 chunks** in 3.6 s (pdf 132, docx 40, html 35); median 90 tokens, mean 175, max 519. Chunking is negligible next to the 180 s parse
+- ~~The budget applies to the raw chunk, not `embed_text`~~ — Docling sizes the chunk then prepends the heading path, so 27 of 207 run up to 7 tokens over. Harmless (BGE-M3 takes 8192) but downstream code must not assume 512
 
 ## RAG — Generate
 - Enable citations on the generation call; fall back to a canned reply when a response carries none (TODO in `app/rag/llm.py`)
@@ -178,6 +182,14 @@ Lives in `app/rag/ingest/`. Produces an enriched `DoclingDocument` per document;
 - Add 10 more large files > 15 pages to the corpus
 - Add a SQL DB to store sessions -> improve the security and also can track the usage data to create dashboards
 - Rate limiting on `/api/chat` — a refused message is kept out of the history, so an attacker retries from a clean conversation with no accumulating penalty
+
+**Tooling not set up yet** — none of it changes behaviour, which is why it lost to features on a timed PoC:
+- **Linting and formatting** (ruff). The `# noqa: E402` comments on the deliberately-late imports are already written but inert until a linter exists
+- **Type checking** (mypy or pyright) — the codebase is annotated throughout, so this is mostly configuration
+- **Pre-commit hooks** to run the fast suite plus the above, instead of relying on remembering
+- **CI** — run the fast suite, the ingest suite, and a docling-marked run on a schedule rather than per commit given it needs the models
+- **Coverage reporting**, to find the untested branches rather than guess at them
+- **Dependency pinning audit** — `uv.lock` covers Python, but the Qdrant image tag and the base images are pinned by hand
 
 ## Docs
 - Add diagram as code and use it to generate diagrams. One or more diagrams to handle overall arch, rag pipeline, detalied parts of the app
