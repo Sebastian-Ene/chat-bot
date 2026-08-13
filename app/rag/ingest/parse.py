@@ -3,11 +3,12 @@
 One converter is built for the process and reused: it loads layout, table and
 OCR models, so constructing it per document would dominate a run.
 
-A document that fails to convert is logged at ERROR and skipped — one malformed
-file must not block the rest of the corpus. Because what is indexed is read back
-from the collection, a skipped document is simply still missing and gets retried
-on the next run, with no bookkeeping to keep straight. In production these ERROR
-lines would be alerted on, so a document that never parses cannot fail silently.
+Conversion failures raise `ParseFailed`; the runner turns that into a skipped
+document and an ERROR line naming the file. One malformed file must not block
+the rest of the corpus, and because what is indexed is read back from the
+collection, a skipped document is simply still missing and gets retried on the
+next run, with no bookkeeping to keep straight. In production those ERROR lines
+would be alerted on, so a document that never parses cannot fail silently.
 """
 import logging
 import os
@@ -114,24 +115,3 @@ def parse(document: DiscoveredDocument) -> ParsedDocument:
     return parsed
 
 
-def parse_all(documents: list[DiscoveredDocument]) -> tuple[list[ParsedDocument], list[str]]:
-    """Parse each document, skipping the ones that fail.
-
-    Returns the successes and the doc_ids that failed, so the run summary can
-    report them rather than letting a failure disappear into the log.
-    """
-    parsed: list[ParsedDocument] = []
-    failed: list[str] = []
-
-    for document in documents:
-        try:
-            parsed.append(parse(document))
-        except ParseFailed as error:
-            # Alert on this in production — a document that never parses is
-            # invisible in retrieval and nothing else will report it.
-            logger.error("parse failed, skipping: %s", error)
-            failed.append(document.doc_id)
-
-    if failed:
-        logger.error("%d of %d documents failed to parse", len(failed), len(documents))
-    return parsed, failed

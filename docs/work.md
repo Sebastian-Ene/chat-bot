@@ -119,8 +119,6 @@ Lives in `app/rag/ingest/`. Produces an enriched `DoclingDocument` per document;
 - ~~Add a DOCX figure to the corpus~~ — no DOCX carried an image, so the format's description path was untestable; `accessory-catalogue-en.docx` now has a captioned figure and `troubleshooting-zeitplan-de.docx` an uncaptioned one
 
 ## RAG — Store
-- Derive point IDs as `uuid5(doc_id, chunk_index)`
-- Store chunk payload: `doc_id`, `chunk_index`, `parent_id`, `page_no(s)`, `heading_path`, `element_types`, `lang`, `source_format`, `caption_provenance`, `doc_content_hash`
 - Implement hybrid retrieval via the Query API (`prefetch` dense + sparse, RRF fusion)
 - Implement neighbour expansion: fetch siblings by payload filter on (`doc_id`, `chunk_index` range), merge overlapping windows, clamp to `parent_id`
 - Use Qdrant's embedded mode (`:memory:` / local path) in unit tests
@@ -138,6 +136,11 @@ Lives in `app/rag/ingest/`. Produces an enriched `DoclingDocument` per document;
 - ~~Created by the ingest job, never the api~~ — an api that auto-creates an empty collection turns "never ingested" into "every question unanswerable"
 - ~~Dense distance is **dot**, not cosine~~ — identical while embeddings are unit-norm, and skips Qdrant's normalisation pass. It goes silently wrong if normalisation is ever turned off, so the embedding tests assert unit norm and `app/vector_store.py` carries the warning
 - ~~Refuse a collection built for a different embedding~~ — wrong width, wrong distance or a missing dense vector raises `CollectionMismatch` naming the fix, instead of mixing incompatible vectors and degrading retrieval quietly
+- ~~Index chunks as points~~ (`app/rag/ingest/index.py`) — `uuid5(doc_id, chunk_index)` ids so re-ingesting overwrites in place; payload carries the chunk text, so retrieval answers in one round trip and the api never needs the corpus mounted. `embed_text` is not stored — it exists only to be vectorised
+- ~~One upsert per document, `wait=True`~~ — the invariant `state.py` reads back: a document is present at a hash or absent, never half-written
+- ~~Replace a changed document new-points-first~~ — then delete points whose hash differs. A crash between the two leaves visible duplicates repaired next run; the reverse order would make the document vanish from retrieval. Also handles a new version with *fewer* chunks, which deterministic ids alone would leave stranded
+- ~~Documents deleted from disk have their points removed~~ — by `doc_id` filter, after the per-document loop
+- ~~Process each document end to end~~ (`runner.ingest_document`) — parse → chunk → embed → index, one document at a time. `parse_all`/`chunk_all` removed: holding every parsed document and embedding in memory grows with the corpus for no benefit. A failure at any stage costs one document, and the ERROR names the doc_id *and* the stage, so it can be marked for retry or editing
 
 ## RAG — Generate
 - Enable citations on the generation call; fall back to a canned reply when a response carries none (TODO in `app/rag/llm.py`)

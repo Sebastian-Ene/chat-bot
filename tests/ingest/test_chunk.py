@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from app.rag.ingest.chunk import Chunk, chunk, chunk_all, get_chunker
+from app.rag.ingest.chunk import Chunk, chunk, get_chunker
 
 pytestmark = pytest.mark.ingest
 
@@ -128,15 +128,6 @@ class TestDocumentIdentity:
 
         assert {c.doc_id for c in chunks} == {"b.pdf"}
         assert {c.doc_content_hash for c in chunks} == {"abc123"}
-
-
-class TestChunkAll:
-    def test_flattens_every_document_in_order(self, chunker) -> None:
-        chunker.chunks = [doc_chunk("one")]
-
-        chunks = chunk_all([FakeParsed(doc_id="a.pdf"), FakeParsed(doc_id="b.pdf")])
-
-        assert [c.doc_id for c in chunks] == ["a.pdf", "b.pdf"]
 
 
 def test_chunker_is_built_once(monkeypatch: pytest.MonkeyPatch) -> None:

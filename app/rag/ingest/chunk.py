@@ -113,10 +113,3 @@ def chunk(parsed: ParsedDocument) -> list[Chunk]:
     return chunks
 
 
-def chunk_all(parsed_documents: list[ParsedDocument]) -> list[Chunk]:
-    """Chunk every parsed document, in order."""
-    chunks = [chunk_ for parsed in parsed_documents for chunk_ in chunk(parsed)]
-    logger.info(
-        "chunked %d documents into %d chunks", len(parsed_documents), len(chunks)
-    )
-    return chunks

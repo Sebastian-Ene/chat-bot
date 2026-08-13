@@ -58,7 +58,12 @@ ENV HF_HOME=/opt/models/huggingface
 # for (layout, table structure, and RapidOCR's weights plus its character
 # dictionary) is actually present.
 COPY corpus/docs-initial/bulk/release-notes-4-1-de.pdf /tmp/warmup.pdf
-RUN python -c "\
+#
+# The placeholders exist because the chunker and embedder read `Settings`,
+# which requires the runtime secrets — and the image deliberately carries no
+# `.env`. They are scoped to this RUN, so nothing is written into a layer; the
+# real values arrive from the environment at run time.
+RUN ANTHROPIC_API_KEY=build JWT_SECRET=build python -c "\
 from app.rag.ingest.parse import get_converter; \
 from app.rag.ingest.chunk import get_chunker; \
 from app.embedding import embed_documents; \

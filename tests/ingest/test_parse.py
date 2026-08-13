@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from app.rag.ingest.discovery import DiscoveredDocument
-from app.rag.ingest.parse import ParseFailed, _pdf_options, get_converter, parse, parse_all
+from app.rag.ingest.parse import ParseFailed, _pdf_options, get_converter, parse
 
 pytestmark = pytest.mark.ingest
 
@@ -74,22 +74,8 @@ class TestFailureHandling:
         with pytest.raises(ParseFailed, match="broken.pdf"):
             parse(document("broken.pdf"))
 
-    def test_parse_all_skips_the_failure_and_keeps_going(self) -> None:
-        """One malformed file must not block the rest of the corpus."""
-        parsed, failed = parse_all([document("a.pdf"), document("b.pdf")])
-
-        assert parsed == []
-        assert failed == ["a.pdf", "b.pdf"]
-
-    def test_failures_are_logged_at_error(self, caplog: pytest.LogCaptureFixture) -> None:
-        """Production alerts on these, so a document that never parses cannot
-        disappear quietly."""
-        import logging
-
-        from app.logging_config import INGEST_LOGGER
-
-        with caplog.at_level(logging.ERROR, logger=INGEST_LOGGER):
-            parse_all([document("broken.pdf")])
-
-        assert "parse failed" in caplog.text
-        assert "broken.pdf" in caplog.text
+    def test_the_underlying_error_is_preserved(self) -> None:
+        """The runner logs this text; a bare "parse failed" would not say what
+        to fix."""
+        with pytest.raises(ParseFailed, match="RuntimeError"):
+            parse(document("broken.pdf"))
