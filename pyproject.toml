@@ -24,6 +24,7 @@ dev = [
 # rather than in the main dependencies.
 ingest = [
     "docling>=2.119.0",
+    "flagembedding>=1.4.0",
 ]
 
 [tool.uv]
@@ -33,9 +34,10 @@ default-groups = ["dev", "ingest"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-addopts = "-m 'not e2e and not docling'"
+addopts = "-m 'not e2e and not docling and not embedding'"
 markers = [
     "e2e: browser-driven Playwright tests. Run separately (`uv run pytest -m e2e`) — mixing them with anyio-marked tests in the same process breaks anyio's asyncio runner.",
     "ingest: ingestion pipeline tests (`uv run pytest -m ingest`, or `pytest tests/ingest`). Note a command-line `-m` replaces the whole filter in addopts, so exclusions must be spelled out in full: `-m 'not e2e and not docling and not ingest'`.",
     "docling: parses real documents with real models. Minutes, so out of the default run — `uv run pytest -m docling`.",
+    "embedding: loads BGE-M3 and embeds for real. Several GB of weights, so out of the default run — `uv run pytest -m embedding`.",
 ]

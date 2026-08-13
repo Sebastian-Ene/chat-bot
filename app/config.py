@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     # ceiling, because a large chunk dilutes the embedding and costs precision.
     embedding_model: str = "BAAI/bge-m3"
     chunk_max_tokens: int = 512
+    # Above `chunk_max_tokens`: the chunker sizes the raw chunk, then prepends
+    # the heading path, so the embedded text runs slightly longer. Anything at
+    # or below the chunk budget would truncate those chunks silently.
+    embed_max_tokens: int = 1024
+    embed_batch_size: int = 16
 
     # DEBUG by default: per-stage timings are only measured at this level, and
     # this is a PoC whose latency breakdown is a deliverable.

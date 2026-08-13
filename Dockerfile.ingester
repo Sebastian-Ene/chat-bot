@@ -61,8 +61,10 @@ COPY corpus/docs-initial/bulk/release-notes-4-1-de.pdf /tmp/warmup.pdf
 RUN python -c "\
 from app.rag.ingest.parse import get_converter; \
 from app.rag.ingest.chunk import get_chunker; \
+from app.embedding import embed_documents; \
 get_converter().convert('/tmp/warmup.pdf'); \
-get_chunker()" \
+get_chunker(); \
+embed_documents(['warmup'])" \
     && rm /tmp/warmup.pdf
 
 # /corpus is a volume mount point: a named volume inherits the mount point's
