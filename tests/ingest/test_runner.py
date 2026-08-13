@@ -57,6 +57,14 @@ class TestDryRun:
 
         assert parsed == []
 
+    def test_the_store_is_left_untouched(self, client, corpus, parsed) -> None:
+        """"Show me what would happen" must not create anything."""
+        from app.config import get_settings
+
+        run(client, dry_run=True)
+
+        assert not client.collection_exists(get_settings().qdrant_collection)
+
     def test_the_plan_is_still_reported(self, client, corpus, parsed) -> None:
         """The point of a dry run: see the work without doing it."""
         report = run(client, dry_run=True)

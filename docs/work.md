@@ -119,7 +119,6 @@ Lives in `app/rag/ingest/`. Produces an enriched `DoclingDocument` per document;
 - ~~Add a DOCX figure to the corpus~~ — no DOCX carried an image, so the format's description path was untestable; `accessory-catalogue-en.docx` now has a captioned figure and `troubleshooting-zeitplan-de.docx` an uncaptioned one
 
 ## RAG — Store
-- Set up the Qdrant collection: named dense + sparse vectors sized for BGE-M3
 - Derive point IDs as `uuid5(doc_id, chunk_index)`
 - Store chunk payload: `doc_id`, `chunk_index`, `parent_id`, `page_no(s)`, `heading_path`, `element_types`, `lang`, `source_format`, `caption_provenance`, `doc_content_hash`
 - Implement hybrid retrieval via the Query API (`prefetch` dense + sparse, RRF fusion)
@@ -131,6 +130,14 @@ Lives in `app/rag/ingest/`. Produces an enriched `DoclingDocument` per document;
 - ~~Embed `contextualize()` output, keep the raw text separately~~ — `embed_text` carries the heading path so a chunk is findable by its section; `text` is what reaches the LLM and the citation, since heading breadcrumbs in the prompt end up in the answer
 - ~~Corpus baseline~~ — 20 documents → **207 chunks** in 3.6 s (pdf 132, docx 40, html 35); median 90 tokens, mean 175, max 519. Chunking is negligible next to the 180 s parse
 - ~~The budget applies to the raw chunk, not `embed_text`~~ — Docling sizes the chunk then prepends the heading path, so 27 of 207 run up to 7 tokens over. Harmless (BGE-M3 takes 8192) but downstream code must not assume 512
+- ~~Embed with BGE-M3, dense + sparse~~ (`app/embedding.py`) — both from one forward pass, so hybrid costs one model. Sparse is BGE-M3's own learned lexical weights, not BM25. Shared by the job and the api: a query embedded differently from its chunks silently fails to retrieve them
+- ~~`FlagEmbedding` truncates at 512 by default~~ — `embed_max_tokens=1024` set explicitly, or the 27 over-budget chunks lose their tails with nothing in any log. A test asserts the setting stays above the chunk budget
+- ~~Embedding baseline~~ — 207 chunks in **13.7 s** (66 ms each), sparse terms median 52; **query embedding 33 ms**, negligible against the 5 s budget. Full ingestion is now ~194 s, still 93% parsing
+- ~~Cross-lingual retrieval verified~~ — English *and* German queries both land closer to the German chunk than to an unrelated English one, which is what justified dropping translation from the rewrite step
+- ~~Qdrant collection with named dense + sparse vectors~~ (`app/vector_store.py`) — both on one point, so a hybrid query prefetches each branch and fuses server-side; `doc_id` payload-indexed since every state read and delete filters on it. Verified against the real server, not just in-memory
+- ~~Created by the ingest job, never the api~~ — an api that auto-creates an empty collection turns "never ingested" into "every question unanswerable"
+- ~~Dense distance is **dot**, not cosine~~ — identical while embeddings are unit-norm, and skips Qdrant's normalisation pass. It goes silently wrong if normalisation is ever turned off, so the embedding tests assert unit norm and `app/vector_store.py` carries the warning
+- ~~Refuse a collection built for a different embedding~~ — wrong width, wrong distance or a missing dense vector raises `CollectionMismatch` naming the fix, instead of mixing incompatible vectors and degrading retrieval quietly
 
 ## RAG — Generate
 - Enable citations on the generation call; fall back to a canned reply when a response carries none (TODO in `app/rag/llm.py`)

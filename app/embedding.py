@@ -26,8 +26,6 @@ from app.logging_config import APP_LOGGER  # noqa: E402
 
 logger = logging.getLogger(APP_LOGGER)
 
-DENSE_DIMENSIONS = 1024
-
 
 @dataclass(frozen=True)
 class Embedding:

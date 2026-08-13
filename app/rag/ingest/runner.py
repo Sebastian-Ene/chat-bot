@@ -19,6 +19,7 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
 from qdrant_client import QdrantClient  # noqa: E402
 
+from app import vector_store  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.logging_config import INGEST_LOGGER  # noqa: E402
 from app.rag.ingest.discovery import discover  # noqa: E402
@@ -74,6 +75,9 @@ def run(client: QdrantClient, *, force: bool = False, dry_run: bool = False) -> 
         report = RunReport(discovered=len(discovered), plan=plan, dry_run=True)
         logger.info("ingestion run finished %s", report.summary())
         return report
+
+    # After the dry run returns: a dry run must leave the store untouched.
+    vector_store.ensure_collection(client)
 
     to_parse = discovered if force else plan.to_index
     if force:

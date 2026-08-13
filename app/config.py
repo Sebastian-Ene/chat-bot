@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # alike. Chunks are sized in BGE-M3's own tokens; 512 rather than its 8192
     # ceiling, because a large chunk dilutes the embedding and costs precision.
     embedding_model: str = "BAAI/bge-m3"
+    # BGE-M3's dense width. Lives here rather than in `app/embedding.py` because
+    # the collection schema needs it and the api must be able to read it without
+    # importing the embedding stack — that would drag torch into the api image.
+    embedding_dimensions: int = 1024
     chunk_max_tokens: int = 512
     # Above `chunk_max_tokens`: the chunker sizes the raw chunk, then prepends
     # the heading path, so the embedded text runs slightly longer. Anything at

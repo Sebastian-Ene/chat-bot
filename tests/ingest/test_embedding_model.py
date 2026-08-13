@@ -12,7 +12,7 @@ import math
 import pytest
 
 from app.config import get_settings
-from app.embedding import DENSE_DIMENSIONS, embed_documents, embed_query
+from app.embedding import embed_documents, embed_query
 from app.rag.ingest.chunk import get_chunker
 
 pytestmark = [pytest.mark.ingest, pytest.mark.embedding]
@@ -38,7 +38,12 @@ def cosine(left: list[float], right: list[float]) -> float:
 
 class TestDense:
     def test_has_the_width_the_collection_is_sized_for(self, chunk_embeddings) -> None:
-        assert all(len(e.dense) == DENSE_DIMENSIONS for e in chunk_embeddings)
+        """The collection is created from this setting, so a mismatch here means
+        every upsert is rejected."""
+        assert all(
+            len(e.dense) == get_settings().embedding_dimensions
+            for e in chunk_embeddings
+        )
 
     def test_vectors_are_unit_norm(self, chunk_embeddings) -> None:
         """Normalisation is what lets Qdrant's cosine distance be a dot product."""
