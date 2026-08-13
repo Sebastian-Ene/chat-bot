@@ -9,6 +9,9 @@ dependencies = [
     "anthropic>=0.116.0",
     "pyjwt>=2.13.0",
     "qdrant-client>=1.19.0",
+    # Not ingestion-only: the api embeds the query before searching, and it must
+    # use the same model as the corpus was indexed with. Brings torch with it.
+    "flagembedding>=1.4.0",
 ]
 
 [dependency-groups]
@@ -19,12 +22,11 @@ dev = [
     "python-docx>=1.2.0",
     "reportlab>=5.0.0",
 ]
-# Ingestion only. Docling drags in torch, transformers and the layout/OCR
-# models; the api image must carry none of it, so it lives in its own group
-# rather than in the main dependencies.
+# Parsing only. Docling drags in the layout, table-structure and OCR models on
+# top of torch, and no request path touches any of it — so it stays out of the
+# api image, which is the larger half of the split.
 ingest = [
     "docling>=2.119.0",
-    "flagembedding>=1.4.0",
 ]
 
 [tool.uv]

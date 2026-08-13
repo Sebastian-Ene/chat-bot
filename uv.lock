@@ -233,6 +233,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "anthropic" },
     { name = "fastapi", extra = ["standard"] },
+    { name = "flagembedding" },
     { name = "pydantic-settings" },
     { name = "pyjwt" },
     { name = "qdrant-client" },
@@ -248,13 +249,13 @@ dev = [
 ]
 ingest = [
     { name = "docling" },
-    { name = "flagembedding" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=0.116.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.141.1" },
+    { name = "flagembedding", specifier = ">=1.4.0" },
     { name = "pydantic-settings", specifier = ">=2.15.0" },
     { name = "pyjwt", specifier = ">=2.13.0" },
     { name = "qdrant-client", specifier = ">=1.19.0" },
@@ -268,10 +269,7 @@ dev = [
     { name = "python-docx", specifier = ">=1.2.0" },
     { name = "reportlab", specifier = ">=5.0.0" },
 ]
-ingest = [
-    { name = "docling", specifier = ">=2.119.0" },
-    { name = "flagembedding", specifier = ">=1.4.0" },
-]
+ingest = [{ name = "docling", specifier = ">=2.119.0" }]
 
 [[package]]
 name = "click"

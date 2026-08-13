@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # serves the app must share it, or tokens minted by one are rejected by
     # another.
     jwt_secret: SecretStr
-    jwt_ttl_seconds: int = 300
+    jwt_ttl_seconds: int = 1800
 
     # Extra retrieval branches from the rewrite. Both are unproven — switch them
     # off to A/B against the eval harness once a corpus exists.
@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     # or below the chunk budget would truncate those chunks silently.
     embed_max_tokens: int = 1024
     embed_batch_size: int = 16
+
+    # Per-branch candidates before fusion, and how many survive it. Prefetch is
+    # deliberately wider than top_k: RRF can only rank what the branches
+    # surfaced, so a chunk missing from every branch's shortlist is unreachable.
+    retrieval_prefetch_limit: int = 20
+    retrieval_top_k: int = 5
 
     # DEBUG by default: per-stage timings are only measured at this level, and
     # this is a PoC whose latency breakdown is a deliverable.

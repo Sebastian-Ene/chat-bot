@@ -30,9 +30,8 @@ services:
       QDRANT_URL: http://qdrant:6333
       # The service appends its own subdirectory — see configure_logging.
       LOG_DIR: /app/logs
-      # Model weights land here, on a named volume, so they are downloaded once
-      # rather than on every container recreate.
-      HF_HOME: /models/huggingface
+      # No HF_HOME and no model cache volume: BGE-M3 is baked into the image, and
+      # a volume mounted over it would hide what the image carries.
     ports:
       - "8000:8000"
     volumes:
@@ -41,10 +40,6 @@ services:
       # image — see docs/considerations.md.
       - ./app:/app/app
       - ./logs:/app/logs
-      # Survives recreates, so weights are not re-downloaded on every change.
-      # The api needs it once BGE-M3 lands for query embedding; the ingester
-      # will share the same volume.
-      - model-cache:/models
     command:
       - uvicorn
       - app.main:app
@@ -89,4 +84,3 @@ services:
 
 volumes:
   qdrant-storage:
-  model-cache:

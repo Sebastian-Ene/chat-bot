@@ -3,6 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.rag.retriever import RetrievedChunk
 from app.routers.api import OUTCOME_HEADER, REFUSAL_REPLY, UNAVAILABLE_REPLY
 from app.security import issue_token
 from tests.fake_anthropic import (
@@ -238,9 +239,9 @@ def test_safe_input_forwards_the_rewritten_query_to_retrieval(
 ) -> None:
     seen = {}
 
-    async def spy(queries: object) -> list[str]:
+    async def spy(queries: object) -> list[RetrievedChunk]:
         seen["queries"] = queries
-        return ["a chunk"]
+        return [RetrievedChunk(text="a chunk", doc_id="a.pdf", chunk_index=0, score=1.0)]
 
     monkeypatch.setattr("app.routers.api.retrieve", spy)
 

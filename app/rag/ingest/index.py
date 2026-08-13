@@ -66,6 +66,7 @@ def to_points(
                     "headings": chunk.headings,
                     "page_numbers": chunk.page_numbers,
                     "source_format": chunk.source_format,
+                    "parent_id": chunk.parent_id,
                 },
             )
         )

@@ -117,14 +117,20 @@ async def _stream_answer(
     )
 
     with timings.stage("retrieval"):
-        context = await retrieve(queries)
+        chunks = await retrieve(queries)
 
     logger.debug(
-        "stage=retrieval branches=%s chunks=%d preview=%r",
+        "stage=retrieval branches=%s chunks=%d sources=%s preview=%r",
         ",".join(queries.branches()),
-        len(context),
-        truncate(" | ".join(context)),
+        len(chunks),
+        ", ".join(chunk.citation() for chunk in chunks) or "none",
+        truncate(" | ".join(chunk.text for chunk in chunks)),
     )
+
+    # TODO(citations): pass the chunks as document blocks instead of flattening
+    # to text, so Claude's native citations resolve to a chunk rather than a
+    # number the model wrote itself. See docs/work.md, RAG — Generate.
+    context = [chunk.text for chunk in chunks]
 
     reply_chars = 0
     streamed = 0

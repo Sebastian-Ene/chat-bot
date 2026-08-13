@@ -34,12 +34,21 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 COPY app ./app
 
-# /models is the mount point for the model-cache volume. It must exist with the
-# right ownership in the image: a named volume inherits the mount point's
-# ownership, and root-owned would make downloads fail for appuser.
+# BGE-M3 is baked in rather than fetched on first use: the api embeds the query
+# before every search, so a first request that downloads 2.3 GB is not a warm-up
+# cost, it is a timeout. Deliberately not under /models — that used to be a
+# volume mount point, and a mounted volume shadows whatever the image carries.
+ENV HF_HOME=/opt/models/huggingface
+
+# The placeholders exist because `Settings` requires the runtime secrets and the
+# image carries no `.env`. Scoped to this RUN, so nothing enters a layer.
+RUN ANTHROPIC_API_KEY=build JWT_SECRET=build \
+    python -c "from app.embedding import embed_documents; embed_documents(['warmup'])"
+
+# The model directory stays root-owned — it is read-only at runtime.
 RUN useradd --create-home --uid 1000 appuser \
-    && mkdir -p /app/logs /models \
-    && chown -R appuser:appuser /app /models
+    && mkdir -p /app/logs \
+    && chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 8000

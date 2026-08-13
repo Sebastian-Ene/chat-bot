@@ -189,8 +189,14 @@ because the PoC needs it.
   `chunk_index` range); merge overlapping windows; clamp to `parent_id`
 - **Re-ranking:** not in the initial build
 - **Chunk payload:** `doc_id`, `chunk_index`, `parent_id`, `page_no(s)`,
-  `heading_path`, `element_types`, `lang`, `source_format`, `caption_provenance`,
-  `doc_content_hash`
+  `heading_path`, `source_format`, `doc_content_hash`, plus the chunk `text` so
+  retrieval answers in one round trip
+  - `parent_id` is the heading path scoped by `doc_id` — Docling exposes no
+    section id, and without the scope every document's "Introduction" would read
+    as one section
+  - no `lang`: nothing supplies it for free and BGE-M3 is multilingual
+  - `element_types` and `caption_provenance` are not stored; the latter arrives
+    with the image descriptions
 
 ### 6.3 Generation
 
@@ -281,7 +287,7 @@ quality. No specific metric mandated by the brief.
   and consumed from there. `.env` gitignored, `.env.example` committed
 - Guardrails apply to user input only (see §6.3)
 - **API tokens (implemented):** the chat page embeds a short-lived HS256 JWT
-  (`JWT_SECRET`, required; `JWT_TTL_SECONDS`, default 300); the frontend sends it
+  (`JWT_SECRET`, required; `JWT_TTL_SECONDS`, default 1800); the frontend sends it
   as `Authorization: Bearer …` and `app/security.py:verify_token` checks
   signature and expiry, returning 401 otherwise. Endpoints opt in via
   `dependencies=[Depends(verify_token)]`.

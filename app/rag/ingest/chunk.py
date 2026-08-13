@@ -51,6 +51,21 @@ class Chunk:
     source_format: str
     headings: list[str] = field(default_factory=list)
     page_numbers: list[int] = field(default_factory=list)
+    # The section this chunk belongs to. Neighbour expansion clamps its window
+    # to it, so a chunk from the next section cannot be pulled in as context and
+    # mislead grounding. Docling exposes no section id, so the heading path
+    # stands in for one — same path, same section.
+    parent_id: str = ""
+
+
+def _parent_id(doc_id: str, headings: list[str]) -> str:
+    """Identify the section a chunk sits in.
+
+    Scoped by `doc_id`: without it, the "Introduction" of fifteen different
+    documents would share one parent_id and expansion could treat unrelated
+    documents as one section.
+    """
+    return f"{doc_id}#{' > '.join(headings)}"
 
 
 @lru_cache(maxsize=1)
@@ -90,19 +105,22 @@ def _page_numbers(doc_chunk) -> list[int]:
 def chunk(parsed: ParsedDocument) -> list[Chunk]:
     """Split one parsed document. An empty document yields no chunks."""
     chunker = get_chunker()
-    chunks = [
-        Chunk(
-            doc_id=parsed.doc_id,
-            doc_content_hash=parsed.content_hash,
-            chunk_index=index,
-            text=doc_chunk.text,
-            embed_text=chunker.contextualize(doc_chunk),
-            source_format=parsed.source_format,
-            headings=list(doc_chunk.meta.headings or []),
-            page_numbers=_page_numbers(doc_chunk),
+    chunks = []
+    for index, doc_chunk in enumerate(chunker.chunk(parsed.document)):
+        headings = list(doc_chunk.meta.headings or [])
+        chunks.append(
+            Chunk(
+                doc_id=parsed.doc_id,
+                doc_content_hash=parsed.content_hash,
+                chunk_index=index,
+                text=doc_chunk.text,
+                embed_text=chunker.contextualize(doc_chunk),
+                source_format=parsed.source_format,
+                headings=headings,
+                page_numbers=_page_numbers(doc_chunk),
+                parent_id=_parent_id(parsed.doc_id, headings),
+            )
         )
-        for index, doc_chunk in enumerate(chunker.chunk(parsed.document))
-    ]
 
     logger.debug(
         "chunked %s chunks=%d pages_covered=%d",

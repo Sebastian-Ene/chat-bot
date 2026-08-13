@@ -42,9 +42,18 @@ container with the API means one ingestion run degrades every in-flight chat
 request, against a brief that mandates concurrent access and a 5 s completion
 target. Separating the processes answers that better than a semaphore does.
 
-The API keeps BGE-M3 for query embedding, so it is not a thin container — that
-is accepted. Index-time and query-time embedding must stay the same model, so a
-model change rolls out to both together.
+The API keeps BGE-M3 for query embedding, so it is **not** a thin container —
+507 MB before, ~7 GB after, since the model brings torch with it. That is the
+price of choosing one model to emit both dense and sparse vectors: the model has
+to exist wherever a vector is produced, and index-time and query-time embedding
+must stay identical or retrieval silently degrades.
+
+The alternative is an **embedder service** both the api and the job call: BGE-M3
+stored once instead of twice, the api back to 507 MB with a fast rebuild, and
+the model scaled — or GPU-placed — independently of a request path that is
+otherwise IO-bound. It is the better production shape and it was not built here:
+a third service and an HTTP contract buy nothing on one machine, where the hop
+costs more than it saves and in-process embedding already answers in 33 ms.
 
 **Ingestion is a job, not a service** — `docker compose run --rm ingest`. It
 runs to completion, is started by an operator or a schedule, and takes minutes;
@@ -56,8 +65,10 @@ an update hook.
 The corpus directory is a volume mounted by the api and the job.
 
 The api image installs main dependencies only (`uv sync --no-default-groups`),
-so Docling, torch and transformers are absent from it — verified in the built
-image, which is 375 MB.
+so **Docling is absent from it** — the layout, table-structure and OCR models
+are the larger half of the 18.3 GB ingest image, and no request path touches
+them. A test asserts the boundary holds (`tests/api/test_image_boundary.py`), so
+an accidental import fails the suite rather than the container.
 
 ### Source is bind-mounted in dev, baked into the image elsewhere
 
@@ -677,7 +688,7 @@ What remains:
 
 ### API tokens — a demonstration, not authentication
 
-The chat page embeds a short-lived signed token (HS256 JWT, 5-minute TTL) in a
+The chat page embeds a short-lived signed token (HS256 JWT, 30-minute TTL) in a
 `<meta>` tag; the frontend sends it as `Authorization: Bearer …` on every API
 call, and `verify_token` checks signature and expiry.
 
@@ -702,10 +713,11 @@ Known limitations, stated rather than hidden:
   exchange.
 - **No identity, no revocation, no rotation** — nothing to revoke, since every
   page render mints a fresh token.
-- **The TTL is user-visible.** At 5 minutes a page left open will start getting
+- **The TTL is user-visible.** A page left open past 30 minutes starts getting
   401s; the frontend surfaces "Your session expired. Please reload the page."
-  rather than a generic failure. A refresh endpoint would remove the friction
-  and is the obvious next step if it becomes annoying.
+  rather than a generic failure. It started at 5 minutes, which expired in the
+  middle of ordinary use — the fix for that is a refresh endpoint, and a longer
+  TTL is the stand-in until there is one.
 - **`JWT_SECRET` is one value for the whole app.** Every process serving it must
   share the secret, or tokens minted by one are rejected by another — so it is a
   required setting rather than a per-process default.
