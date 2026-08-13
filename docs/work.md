@@ -37,9 +37,9 @@
 - ~~Load the embedder at api startup~~ — the first request otherwise paid 4 s of model load inside its own latency budget (12.7 s cold vs 3.6–5.0 s warm)
 
 ## Frontend
-- Grow the input as the message gets long — consider a textarea
 
 --- Done ---
+- ~~Grow the input as the message gets long~~ — a `<textarea>` that auto-grows to ~5 lines then scrolls, so a pasted wall of text cannot squeeze the conversation off screen. Enter sends and Shift+Enter writes a newline, since a textarea's default would leave a chat box that needs the mouse to send
 - ~~Turn `app/templates/index.html` into an actual chat interface~~
 - ~~JS chat widget consuming a streaming response from `/api/chat`~~
 - ~~Fix accessible color contrast on chat bubbles~~

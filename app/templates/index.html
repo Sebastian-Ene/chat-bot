@@ -15,16 +15,16 @@
       <div id="messages" class="messages" role="log" aria-live="polite" aria-label="Conversation"></div>
 
       <form id="chat-form" class="chat-form">
-        <input
+        <textarea
           id="chat-input"
           class="chat-input"
-          type="text"
           name="message"
+          rows="1"
           aria-label="Chat message"
           placeholder="Ask a question…"
           autocomplete="off"
           required
-        />
+        ></textarea>
         <button type="submit" class="chat-send">Send</button>
       </form>
     </main>

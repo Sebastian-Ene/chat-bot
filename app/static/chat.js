@@ -12,6 +12,30 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const turns = [];
 
+  // The input is a textarea so a long question stays readable. It starts one row
+  // tall and grows with the content; CSS max-height clamps it and takes over
+  // with a scrollbar.
+  function autosize() {
+    input.style.height = "auto";
+    input.style.height = `${input.scrollHeight}px`;
+  }
+
+  input.addEventListener("input", autosize);
+  // Size it once now: the natural `rows="1"` height and the height autosize
+  // computes differ by a pixel or two, which would show as a jump on the first
+  // keystroke and leave the box a different size after sending than before.
+  autosize();
+
+  // A textarea's default is Enter for a newline, which would leave a chat box
+  // that can only be sent with the mouse. Swapped: Enter sends, Shift+Enter
+  // writes a newline.
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      form.requestSubmit();
+    }
+  });
+
   function historyToSend() {
     const kept = turns.slice(-MAX_HISTORY_TURNS);
 
@@ -100,6 +124,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     addMessage("user").textContent = message;
     input.value = "";
+    // Clearing the value does not shrink a grown textarea.
+    autosize();
     input.disabled = true;
 
     const assistantEl = addMessage("assistant");

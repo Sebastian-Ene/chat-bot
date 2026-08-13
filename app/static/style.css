@@ -85,6 +85,8 @@ body {
   gap: 0.5rem;
   border-top: 1px solid var(--border);
   padding-top: 1rem;
+  /* Keeps Send at the bottom of a grown input instead of stretched down it. */
+  align-items: flex-end;
 }
 
 .chat-input {
@@ -95,6 +97,15 @@ body {
   background: var(--bg);
   color: var(--fg);
   font-size: 1rem;
+  /* A textarea defaults to monospace and to its own resize handle, which fights
+     the auto-grow in chat.js. */
+  font-family: inherit;
+  line-height: 1.4;
+  resize: none;
+  /* Grows with the message up to ~5 lines, then scrolls — a pasted wall of text
+     must not squeeze the conversation off screen. */
+  max-height: 8rem;
+  overflow-y: auto;
 }
 
 .chat-send {
