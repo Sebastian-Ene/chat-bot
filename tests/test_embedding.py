@@ -6,7 +6,7 @@ the `embedding` marker.
 import numpy as np
 import pytest
 
-from app.embedding import Embedding, embed_documents, embed_query, get_embedder
+from common.embedding import Embedding, embed_documents, embed_query, get_embedder
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def model(monkeypatch: pytest.MonkeyPatch):
 
     fake = FakeModel()
     fake.calls = []
-    monkeypatch.setattr("app.embedding.get_embedder", lambda: fake)
+    monkeypatch.setattr("common.embedding.get_embedder", lambda: fake)
     return fake
 
 
@@ -71,7 +71,7 @@ class TestEmbedDocuments:
         assert model.calls[0]["return_colbert_vecs"] is False
 
     def test_uses_the_configured_batch_size(self, model) -> None:
-        from app.config import get_settings
+        from common.config import get_settings
 
         embed_documents(["a"])
 
@@ -100,9 +100,12 @@ class TestModelConfiguration:
     def test_max_length_clears_the_chunk_budget(self) -> None:
         """The chunker's heading path pushes some chunks past the chunk budget;
         an embed limit at the budget would truncate them silently."""
-        from app.config import get_settings
+        # Built directly rather than taken from the injected settings: this
+        # invariant spans the shared embed budget and the ingest-only chunk
+        # budget, and only `IngestSettings` carries both.
+        from ingestion.config import IngestSettings
 
-        settings = get_settings()
+        settings = IngestSettings()
 
         assert settings.embed_max_tokens > settings.chunk_max_tokens
 
@@ -111,7 +114,7 @@ class TestModelConfiguration:
         calls = []
 
         monkeypatch.setattr(
-            "app.embedding.BGEM3FlagModel",
+            "common.embedding.BGEM3FlagModel",
             lambda *args, **kwargs: calls.append(kwargs) or object(),
         )
 
@@ -130,7 +133,7 @@ class TestModelConfiguration:
         calls = []
 
         monkeypatch.setattr(
-            "app.embedding.BGEM3FlagModel",
+            "common.embedding.BGEM3FlagModel",
             lambda *args, **kwargs: calls.append(kwargs) or object(),
         )
 

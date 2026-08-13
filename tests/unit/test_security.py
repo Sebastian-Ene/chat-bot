@@ -4,8 +4,9 @@ import jwt
 import pytest
 from fastapi import HTTPException, Request
 
-from app.config import get_settings
-from app.security import ALGORITHM, issue_token, verify_token
+from api.core.constants import JWT_ALGORITHM
+from api.core.security import issue_token, verify_token
+from api.core.config import get_settings
 
 
 def _request(headers: dict[str, str] | None = None) -> Request:
@@ -19,7 +20,7 @@ def _bearer(token: str) -> dict[str, str]:
 
 def _encode(payload: dict, secret: str | None = None) -> str:
     secret = secret or get_settings().jwt_secret.get_secret_value()
-    return jwt.encode(payload, secret, algorithm=ALGORITHM)
+    return jwt.encode(payload, secret, algorithm=JWT_ALGORITHM)
 
 
 def test_issued_token_verifies() -> None:
@@ -28,7 +29,7 @@ def test_issued_token_verifies() -> None:
 
 def test_issued_token_carries_issued_at_and_expiry() -> None:
     claims = jwt.decode(
-        issue_token(), get_settings().jwt_secret.get_secret_value(), algorithms=[ALGORITHM]
+        issue_token(), get_settings().jwt_secret.get_secret_value(), algorithms=[JWT_ALGORITHM]
     )
 
     assert claims["exp"] - claims["iat"] == get_settings().jwt_ttl_seconds

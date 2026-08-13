@@ -32,7 +32,8 @@ FROM base AS runtime
 COPY --from=deps /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-COPY app ./app
+COPY api ./api
+COPY common ./common
 
 # BGE-M3 is baked in rather than fetched on first use: the api embeds the query
 # before every search, so a first request that downloads 2.3 GB is not a warm-up
@@ -40,10 +41,14 @@ COPY app ./app
 # volume mount point, and a mounted volume shadows whatever the image carries.
 ENV HF_HOME=/opt/models/huggingface
 
-# The placeholders exist because `Settings` requires the runtime secrets and the
-# image carries no `.env`. Scoped to this RUN, so nothing enters a layer.
-RUN ANTHROPIC_API_KEY=build JWT_SECRET=build \
-    python -c "from app.embedding import embed_documents; embed_documents(['warmup'])"
+# No credentials here: `configure()` takes a settings *instance*, so the warmup
+# builds a throwaway one in-process. Embedding reads only shared settings, and
+# the api's real ApiSettings arrives from the environment at run time.
+RUN python -c "\
+from common.config import Settings, configure; \
+configure(Settings(qdrant_url='http://unused-at-build-time')); \
+from common.embedding import embed_documents; \
+embed_documents(['warmup'])"
 
 # The model directory stays root-owned — it is read-only at runtime.
 RUN useradd --create-home --uid 1000 appuser \
@@ -53,7 +58,9 @@ USER appuser
 
 EXPOSE 8000
 
+# Probes /health, not /: the chat page renders a template and mints a JWT on
+# every request, which is a lot of work to answer "is the process up?".
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/').read()"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

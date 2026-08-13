@@ -8,7 +8,7 @@
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8000}"
 
-args=(uv run uvicorn app.main:app --host "$HOST" --port "$PORT")
+args=(uv run uvicorn api.main:app --host "$HOST" --port "$PORT")
 [ "${RELOAD:-0}" = "1" ] && args+=(--reload)
 
 exec "${args[@]}"

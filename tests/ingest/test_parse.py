@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from app.rag.ingest.discovery import DiscoveredDocument
-from app.rag.ingest.parse import ParseFailed, _pdf_options, get_converter, parse
+from ingestion.discovery import DiscoveredDocument
+from ingestion.parse import ParseFailed, _pdf_options, get_converter, parse
 
 pytestmark = pytest.mark.ingest
 
@@ -46,7 +46,7 @@ def test_converter_is_built_once(monkeypatch: pytest.MonkeyPatch) -> None:
         def __init__(self, **kwargs):
             calls.append(kwargs)
 
-    monkeypatch.setattr("app.rag.ingest.parse.DocumentConverter", FakeConverter)
+    monkeypatch.setattr("ingestion.parse.DocumentConverter", FakeConverter)
     get_converter()
     get_converter()
 
@@ -62,7 +62,7 @@ class TestFailureHandling:
                 raise RuntimeError("corrupt file")
 
         get_converter.cache_clear()
-        monkeypatch.setattr("app.rag.ingest.parse.get_converter", lambda: Boom())
+        monkeypatch.setattr("ingestion.parse.get_converter", lambda: Boom())
         yield
         get_converter.cache_clear()
 

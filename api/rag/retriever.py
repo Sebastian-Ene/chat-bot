@@ -15,11 +15,11 @@ from dataclasses import dataclass, field
 import anyio
 from qdrant_client import models
 
-from app import vector_store
-from app.config import get_settings
-from app.embedding import Embedding, embed_documents
-from app.logging_config import APP_LOGGER, truncate
-from app.vector_store import DENSE_VECTOR, SPARSE_VECTOR
+from common import vector_store
+from api.core.config import get_settings
+from common.embedding import Embedding, embed_documents
+from common.logging_config import APP_LOGGER, truncate
+from common.vector_store import DENSE_VECTOR, SPARSE_VECTOR
 
 logger = logging.getLogger(APP_LOGGER)
 

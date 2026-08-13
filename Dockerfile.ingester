@@ -43,7 +43,8 @@ RUN apt-get update \
 COPY --from=deps /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-COPY app ./app
+COPY ingestion ./ingestion
+COPY common ./common
 
 # Models are baked into the image rather than fetched on first use: the image
 # digest then fully determines what the OCR and layout stages do, replicas start
@@ -59,14 +60,17 @@ ENV HF_HOME=/opt/models/huggingface
 # dictionary) is actually present.
 COPY corpus/docs-initial/bulk/release-notes-4-1-de.pdf /tmp/warmup.pdf
 #
-# The placeholders exist because the chunker and embedder read `Settings`,
-# which requires the runtime secrets — and the image deliberately carries no
-# `.env`. They are scoped to this RUN, so nothing is written into a layer; the
-# real values arrive from the environment at run time.
-RUN ANTHROPIC_API_KEY=build JWT_SECRET=build python -c "\
-from app.rag.ingest.parse import get_converter; \
-from app.rag.ingest.chunk import get_chunker; \
-from app.embedding import embed_documents; \
+# No credentials here: `configure()` takes a settings *instance*, so the warmup
+# builds a throwaway one in-process. The ingest job reads no secrets at all —
+# that is the point of `IngestSettings` — and the real values arrive from the
+# environment at run time.
+RUN python -c "\
+from common.config import configure; \
+from ingestion.config import IngestSettings; \
+configure(IngestSettings(qdrant_url='http://unused-at-build-time')); \
+from ingestion.parse import get_converter; \
+from ingestion.chunk import get_chunker; \
+from common.embedding import embed_documents; \
 get_converter().convert('/tmp/warmup.pdf'); \
 get_chunker(); \
 embed_documents(['warmup'])" \
@@ -83,4 +87,4 @@ USER appuser
 # A job, not a service: it runs to completion and exits, so there is no port, no
 # healthcheck and no server. The exit code is the result — non-zero if any
 # document failed to parse.
-ENTRYPOINT ["python", "-m", "app.rag.ingest"]
+ENTRYPOINT ["python", "-m", "ingestion"]

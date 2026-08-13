@@ -25,8 +25,8 @@ from docling.datamodel.pipeline_options import PdfPipelineOptions  # noqa: E402
 from docling.document_converter import DocumentConverter, PdfFormatOption  # noqa: E402
 from docling_core.types.doc.document import DoclingDocument  # noqa: E402
 
-from app.logging_config import INGEST_LOGGER  # noqa: E402
-from app.rag.ingest.discovery import DiscoveredDocument  # noqa: E402
+from common.logging_config import INGEST_LOGGER  # noqa: E402
+from ingestion.discovery import DiscoveredDocument  # noqa: E402
 
 logger = logging.getLogger(INGEST_LOGGER)
 

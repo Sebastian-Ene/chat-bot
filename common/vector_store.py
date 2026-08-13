@@ -12,15 +12,15 @@ corpus was never ingested" into "every question is unanswerable" — much harder
 to diagnose.
 
 Note this module is imported by the api, so it must not import
-`app.embedding` — that would pull FlagEmbedding and torch into the api image,
+`common.embedding` — that would pull FlagEmbedding and torch into the api image,
 which deliberately carries neither. Hence the vector width comes from settings.
 """
 import logging
 
 from qdrant_client import QdrantClient, models
 
-from app.config import get_settings
-from app.logging_config import APP_LOGGER
+from common.config import get_settings
+from common.logging_config import APP_LOGGER
 
 logger = logging.getLogger(APP_LOGGER)
 

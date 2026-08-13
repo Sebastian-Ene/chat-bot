@@ -140,8 +140,8 @@ because the PoC needs it.
   setup
 - The corpus directory is a volume mounted by the api and the ingest job.
   Index-time and query-time embedding must use the same model
-- **Current state:** minimal FastAPI app (`app/main.py`, `app/routers/`) serving
-  the chat UI, with mocked retrieval and completion (`app/rag/`). Real RAG not
+- **Current state:** minimal FastAPI app (`api/main.py`, `api/routers/`) serving
+  the chat UI, with mocked retrieval and completion (`api/rag/`). Real RAG not
   yet wired in
 
 ## 6. Functional Requirements
@@ -169,8 +169,8 @@ because the PoC needs it.
   chunk IDs allow upserts, and all of a document's points are written in one
   upsert so it is atomically indexed or not. Documents that disappear have their
   vectors removed
-- **Where it runs:** `app/rag/ingest/`, as a batch job — `python -m
-  app.rag.ingest`, or `docker compose run --rm ingest`. It takes **no** directory
+- **Where it runs:** `ingestion/`, as a batch job — `python -m
+  ingestion`, or `docker compose run --rm ingest`. It takes **no** directory
   argument: the root is the `CORPUS_DIR` setting, fixed at startup, so a run
   cannot be aimed at arbitrary files on the host
 
@@ -244,7 +244,7 @@ because the PoC needs it.
   once a corpus exists — they are unproven. No translated branch: cross-lingual
   is left to BGE-M3's dense side
 - The same call also returns a **safety verdict** on the user's message
-  (`app/rag/query_analysis.py`), so both jobs cost one round trip rather than
+  (`api/rag/query_analysis.py`), so both jobs cost one round trip rather than
   two. Unsafe input is refused before retrieval and generation. The caller
   **fails closed**: no usable verdict means the request is refused
 - Must support concurrent access, stream responses, and emit timing metrics
@@ -253,8 +253,8 @@ because the PoC needs it.
 
 - Any HTML-rendering technology; Streamlit disallowed. Simple chat interface,
   streaming responses, minimal styling
-- **Implemented:** plain HTML + vanilla JS (`app/templates/index.html`,
-  `app/static/`), no build step, served by the backend. Elements use accessible
+- **Implemented:** plain HTML + vanilla JS (`api/templates/index.html`,
+  `api/static/`), no build step, served by the backend. Elements use accessible
   names and roles for stable e2e targeting
 
 ## 7. Non-Functional Requirements
@@ -288,7 +288,7 @@ quality. No specific metric mandated by the brief.
 - Guardrails apply to user input only (see §6.3)
 - **API tokens (implemented):** the chat page embeds a short-lived HS256 JWT
   (`JWT_SECRET`, required; `JWT_TTL_SECONDS`, default 1800); the frontend sends it
-  as `Authorization: Bearer …` and `app/security.py:verify_token` checks
+  as `Authorization: Bearer …` and `api/core/security.py:verify_token` checks
   signature and expiry, returning 401 otherwise. Endpoints opt in via
   `dependencies=[Depends(verify_token)]`.
   **This is not authentication** — anyone who loads the page gets a token. It

@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from qdrant_client import QdrantClient, models
 
-from app.rag.ingest.discovery import DiscoveredDocument
-from app.rag.ingest.state import indexed_documents, plan
+from ingestion.discovery import DiscoveredDocument
+from ingestion.state import indexed_documents, plan
 
 pytestmark = pytest.mark.ingest
 

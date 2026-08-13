@@ -9,11 +9,11 @@ from pathlib import Path
 import pytest
 from qdrant_client import QdrantClient
 
-from app.logging_config import INGEST_LOGGER
-from app.rag.ingest import __main__ as cli
-from app.rag.ingest.discovery import DiscoveredDocument
-from app.rag.ingest.runner import DocumentFailed, RunReport, ingest_document, run
-from app.rag.ingest.state import IngestPlan
+from common.logging_config import INGEST_LOGGER
+from ingestion import __main__ as cli
+from ingestion.discovery import DiscoveredDocument
+from ingestion.runner import DocumentFailed, RunReport, ingest_document, run
+from ingestion.state import IngestPlan
 
 pytestmark = pytest.mark.ingest
 
@@ -37,7 +37,7 @@ def client() -> QdrantClient:
 @pytest.fixture
 def corpus(monkeypatch: pytest.MonkeyPatch) -> list[DiscoveredDocument]:
     documents = [document("a.pdf"), document("b.pdf")]
-    monkeypatch.setattr("app.rag.ingest.runner.discover", lambda _root: documents)
+    monkeypatch.setattr("ingestion.runner.discover", lambda _root: documents)
     return documents
 
 
@@ -51,9 +51,9 @@ def pipeline(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         return 3
 
     monkeypatch.setattr(
-        "app.rag.ingest.runner.ingest_document", fake_ingest_document
+        "ingestion.runner.ingest_document", fake_ingest_document
     )
-    monkeypatch.setattr("app.rag.ingest.runner.delete_documents", lambda *_args: 0)
+    monkeypatch.setattr("ingestion.runner.delete_documents", lambda *_args: 0)
     return processed
 
 
@@ -69,7 +69,7 @@ class TestDryRun:
 
     def test_the_store_is_left_untouched(self, client, corpus, pipeline) -> None:
         """"Show me what would happen" must not create anything."""
-        from app.config import get_settings
+        from common.config import get_settings
 
         run(client, dry_run=True)
 
@@ -90,7 +90,7 @@ class TestPlanDrivesTheRun:
         """An unchanged document must not be re-processed — that is the whole
         point of deriving state from the collection."""
         monkeypatch.setattr(
-            "app.rag.ingest.runner.build_plan",
+            "ingestion.runner.build_plan",
             lambda _client, discovered: plan_with_unchanged(discovered),
         )
 
@@ -102,7 +102,7 @@ class TestPlanDrivesTheRun:
         self, client, corpus, pipeline, monkeypatch
     ) -> None:
         monkeypatch.setattr(
-            "app.rag.ingest.runner.build_plan",
+            "ingestion.runner.build_plan",
             lambda _client, discovered: plan_with_unchanged(discovered),
         )
 
@@ -123,9 +123,9 @@ class TestFailureIsolation:
             return 3
 
         monkeypatch.setattr(
-            "app.rag.ingest.runner.ingest_document", fake_ingest_document
+            "ingestion.runner.ingest_document", fake_ingest_document
         )
-        monkeypatch.setattr("app.rag.ingest.runner.delete_documents", lambda *_args: 0)
+        monkeypatch.setattr("ingestion.runner.delete_documents", lambda *_args: 0)
         return processed
 
     def test_the_rest_of_the_corpus_still_runs(
@@ -164,14 +164,14 @@ class TestDeletions:
     ) -> None:
         deleted = []
         monkeypatch.setattr(
-            "app.rag.ingest.runner.ingest_document", lambda _client, _doc: 1
+            "ingestion.runner.ingest_document", lambda _client, _doc: 1
         )
         monkeypatch.setattr(
-            "app.rag.ingest.runner.delete_documents",
+            "ingestion.runner.delete_documents",
             lambda _client, doc_ids: deleted.append(doc_ids) or 7,
         )
         monkeypatch.setattr(
-            "app.rag.ingest.runner.build_plan",
+            "ingestion.runner.build_plan",
             lambda _client, discovered: IngestPlan(
                 new=list(discovered), deleted=["gone.pdf"]
             ),
@@ -188,7 +188,7 @@ class TestIngestDocument:
         """Without the stage, an error says a document is broken but not where
         to look."""
         monkeypatch.setattr(
-            "app.rag.ingest.runner.parse",
+            "ingestion.runner.parse",
             lambda _document: (_ for _ in ()).throw(RuntimeError("boom")),
         )
 
@@ -199,8 +199,8 @@ class TestIngestDocument:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Some documents legitimately hold nothing chunkable."""
-        monkeypatch.setattr("app.rag.ingest.runner.parse", lambda _document: object())
-        monkeypatch.setattr("app.rag.ingest.runner.chunk", lambda _parsed: [])
+        monkeypatch.setattr("ingestion.runner.parse", lambda _document: object())
+        monkeypatch.setattr("ingestion.runner.chunk", lambda _parsed: [])
 
         assert ingest_document(None, document("empty.pdf")) == 0
 

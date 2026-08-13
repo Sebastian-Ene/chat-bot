@@ -38,7 +38,7 @@ uv run pytest -m e2e
 ```
 
 `tests/conftest.py` provides a session-scoped `live_server` fixture that runs
-`app.main:app` via `uvicorn` in a background thread on a free local port and
+`api.main:app` via `uvicorn` in a background thread on a free local port and
 yields the base URL — use it in any e2e test that needs a running server.
 
 **Always run e2e tests as their own invocation, never mixed with the

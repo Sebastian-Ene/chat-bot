@@ -13,9 +13,9 @@ from dataclasses import dataclass, field
 
 from qdrant_client import QdrantClient
 
-from app.config import get_settings
-from app.logging_config import INGEST_LOGGER
-from app.rag.ingest.discovery import DiscoveredDocument
+from ingestion.config import get_settings
+from common.logging_config import INGEST_LOGGER
+from ingestion.discovery import DiscoveredDocument
 
 logger = logging.getLogger(INGEST_LOGGER)
 

@@ -6,17 +6,17 @@ what is under test is what lands in the collection and what is removed.
 import pytest
 from qdrant_client import QdrantClient, models
 
-from app.config import get_settings
-from app.embedding import Embedding
-from app.rag.ingest.chunk import Chunk
-from app.rag.ingest.index import (
+from common.config import get_settings
+from common.embedding import Embedding
+from common.vector_store import DENSE_VECTOR, SPARSE_VECTOR, ensure_collection
+from ingestion.chunk import Chunk
+from ingestion.index import (
     delete_documents,
     delete_stale,
     index_document,
     point_id,
     to_points,
 )
-from app.vector_store import DENSE_VECTOR, SPARSE_VECTOR, ensure_collection
 
 pytestmark = pytest.mark.ingest
 

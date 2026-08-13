@@ -15,18 +15,12 @@ from collections.abc import Callable
 import anthropic
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
-from app import anthropic_client
-from app.config import get_settings
-from app.guardrails import guard
-from app.logging_config import APP_LOGGER, truncate
-from app.timings import TokenUsage
-
-MAX_TOKENS = 512
-
-# Structured outputs cannot express array length limits, so the caps live in the
-# prompt and are enforced here.
-MAX_KEYWORDS = 8
-MAX_SUB_QUERIES = 3
+from api.core.constants import ANALYSIS_MAX_TOKENS, MAX_KEYWORDS, MAX_SUB_QUERIES
+from api.core.timings import TokenUsage
+from api.rag import anthropic_client
+from api.rag.guardrails import guard
+from api.core.config import get_settings
+from common.logging_config import APP_LOGGER, truncate
 
 logger = logging.getLogger(APP_LOGGER)
 
@@ -192,7 +186,7 @@ async def analyse_query(
     try:
         response = await anthropic_client.get_client().messages.create(
             model=get_settings().anthropic_model,
-            max_tokens=MAX_TOKENS,
+            max_tokens=ANALYSIS_MAX_TOKENS,
             system=system_prompt(),
             messages=[{"role": "user", "content": _build_prompt(query, history)}],
             output_config={"format": {"type": "json_schema", "schema": response_schema()}},

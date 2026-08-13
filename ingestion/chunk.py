@@ -32,9 +32,9 @@ from docling_core.transforms.chunker.tokenizer.huggingface import (  # noqa: E40
     HuggingFaceTokenizer,
 )
 
-from app.config import get_settings  # noqa: E402
-from app.logging_config import INGEST_LOGGER  # noqa: E402
-from app.rag.ingest.parse import ParsedDocument  # noqa: E402
+from ingestion.config import get_settings  # noqa: E402
+from common.logging_config import INGEST_LOGGER  # noqa: E402
+from ingestion.parse import ParsedDocument  # noqa: E402
 
 logger = logging.getLogger(INGEST_LOGGER)
 

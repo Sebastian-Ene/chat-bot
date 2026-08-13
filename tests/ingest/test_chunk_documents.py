@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from app.rag.ingest.chunk import chunk, get_chunker
-from app.rag.ingest.discovery import discover
-from app.rag.ingest.parse import parse
+from ingestion.chunk import chunk, get_chunker
+from ingestion.discovery import discover
+from ingestion.parse import parse
 
 pytestmark = [pytest.mark.ingest, pytest.mark.docling]
 

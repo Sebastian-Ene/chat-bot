@@ -10,8 +10,8 @@ Two loggers:
 import logging
 from logging.handlers import RotatingFileHandler
 
-from app.config import get_settings
-from app.request_context import RequestIdFilter
+from common.config import get_settings
+from common.request_context import RequestIdFilter
 
 APP_LOGGER = "app"
 PERFORMANCE_LOGGER = "app.performance"

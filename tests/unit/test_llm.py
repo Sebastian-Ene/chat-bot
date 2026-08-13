@@ -1,9 +1,9 @@
 import anthropic
 import pytest
 
-from app.config import get_settings
-from app.guardrails import SYSTEM_PROMPT
-from app.rag.llm import ERROR_REPLY, MAX_TOKENS, stream_completion
+from api.core.constants import ERROR_REPLY, GENERATION_MAX_TOKENS, SYSTEM_PROMPT
+from api.rag.llm import stream_completion
+from api.core.config import get_settings
 from tests.fake_anthropic import STUBBED_REPLY, FakeAnthropic
 
 
@@ -24,7 +24,7 @@ async def test_stream_completion_sends_configured_model_and_system_prompt(
     call = stub_anthropic.messages.calls[0]
     assert call["model"] == get_settings().anthropic_model
     assert call["system"] == SYSTEM_PROMPT
-    assert call["max_tokens"] == MAX_TOKENS
+    assert call["max_tokens"] == GENERATION_MAX_TOKENS
 
 
 @pytest.mark.anyio
@@ -83,11 +83,44 @@ async def test_stream_completion_yields_a_fallback_when_the_api_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     failing = FakeAnthropic(error=anthropic.APIConnectionError(request=None))
-    monkeypatch.setattr("app.anthropic_client.get_client", lambda: failing)
+    monkeypatch.setattr("api.rag.anthropic_client.get_client", lambda: failing)
 
     chunks = [chunk async for chunk in stream_completion("hello", context=["some context"])]
 
     assert "".join(chunks) == ERROR_REPLY
+
+
+@pytest.mark.anyio
+async def test_stream_completion_reports_the_failure_to_on_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The apology is yielded like any other text, so a caller that does not
+    watch this callback would record the outage as a successful answer."""
+    failing = FakeAnthropic(error=anthropic.APIConnectionError(request=None))
+    monkeypatch.setattr("api.rag.anthropic_client.get_client", lambda: failing)
+    errors: list[Exception] = []
+
+    async for _ in stream_completion(
+        "hello", context=["some context"], on_error=errors.append
+    ):
+        pass
+
+    assert len(errors) == 1
+    assert isinstance(errors[0], anthropic.APIError)
+
+
+@pytest.mark.anyio
+async def test_stream_completion_leaves_on_error_alone_when_it_succeeds(
+    stub_anthropic: FakeAnthropic,
+) -> None:
+    errors: list[Exception] = []
+
+    async for _ in stream_completion(
+        "hello", context=["some context"], on_error=errors.append
+    ):
+        pass
+
+    assert errors == []
 
 
 @pytest.mark.anyio

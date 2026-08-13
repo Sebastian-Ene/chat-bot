@@ -17,11 +17,11 @@ import uuid
 
 from qdrant_client import QdrantClient, models
 
-from app.config import get_settings
-from app.embedding import Embedding
-from app.logging_config import INGEST_LOGGER
-from app.rag.ingest.chunk import Chunk
-from app.vector_store import DENSE_VECTOR, SPARSE_VECTOR
+from ingestion.config import get_settings
+from common.embedding import Embedding
+from common.logging_config import INGEST_LOGGER
+from common.vector_store import DENSE_VECTOR, SPARSE_VECTOR
+from ingestion.chunk import Chunk
 
 logger = logging.getLogger(INGEST_LOGGER)
 

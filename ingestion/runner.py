@@ -2,7 +2,7 @@
 
 Ingestion is a batch job, not a service. It runs to completion, it is started by
 an operator or a schedule, and it takes minutes — so it is a callable with a
-report, invoked from `python -m app.rag.ingest`, rather than a request handler.
+report, invoked from `python -m ingestion`, rather than a request handler.
 
 Documents are processed **one at a time, all the way through**: parse, chunk,
 embed, index. Holding every parsed document and every embedding in memory before
@@ -21,15 +21,15 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
 from qdrant_client import QdrantClient  # noqa: E402
 
-from app import vector_store  # noqa: E402
-from app.config import get_settings  # noqa: E402
-from app.embedding import embed_documents  # noqa: E402
-from app.logging_config import INGEST_LOGGER  # noqa: E402
-from app.rag.ingest.chunk import chunk  # noqa: E402
-from app.rag.ingest.discovery import DiscoveredDocument, discover  # noqa: E402
-from app.rag.ingest.index import delete_documents, delete_stale, index_document  # noqa: E402
-from app.rag.ingest.parse import parse  # noqa: E402
-from app.rag.ingest.state import IngestPlan, build_plan  # noqa: E402
+from common import vector_store  # noqa: E402
+from ingestion.config import get_settings  # noqa: E402
+from common.embedding import embed_documents  # noqa: E402
+from common.logging_config import INGEST_LOGGER  # noqa: E402
+from ingestion.chunk import chunk  # noqa: E402
+from ingestion.discovery import DiscoveredDocument, discover  # noqa: E402
+from ingestion.index import delete_documents, delete_stale, index_document  # noqa: E402
+from ingestion.parse import parse  # noqa: E402
+from ingestion.state import IngestPlan, build_plan  # noqa: E402
 
 logger = logging.getLogger(INGEST_LOGGER)
 

@@ -2,8 +2,8 @@ import logging
 
 import pytest
 
-from app.logging_config import PERFORMANCE_LOGGER
-from app.timings import NoOpTimings, RequestTimings, TokenUsage, create_timings
+from api.core.timings import NoOpTimings, RequestTimings, TokenUsage, create_timings
+from common.logging_config import PERFORMANCE_LOGGER
 
 
 @pytest.fixture

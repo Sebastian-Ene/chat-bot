@@ -1,4 +1,4 @@
-"""`python -m app.rag.ingest` — the ingestion job's entry point.
+"""`python -m ingestion` — the ingestion job's entry point.
 
 Argument handling and exit codes only; the pipeline lives in `runner.py`. The
 corpus root is never an argument: it is the `CORPUS_DIR` setting, fixed at
@@ -7,14 +7,16 @@ startup, so a run cannot be aimed at arbitrary files on the host.
 import argparse
 import sys
 
-from app import vector_store
-from app.logging_config import configure_logging
-from app.rag.ingest.runner import run
+from common import vector_store
+from common.config import configure
+from common.logging_config import configure_logging
+from ingestion.config import IngestSettings
+from ingestion.runner import run
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python -m app.rag.ingest",
+        prog="python -m ingestion",
         description="Ingest the corpus directory into the vector store.",
     )
     parser.add_argument(
@@ -32,6 +34,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    # First, and before anything reads configuration: `common/` has no settings
+    # of its own and serves whichever child the entrypoint injects.
+    configure(IngestSettings())
     configure_logging("ingest")
 
     # Same fail-fast contract as the api: no vector store, no run.

@@ -362,17 +362,26 @@ the model fragments; large chunks ground well but retrieve poorly.
 | Approach | Trade-off |
 |---|---|
 | Same unit for both | Simplest; fragments may lack context |
-| **Neighbour expansion — chosen** | Retrieve the chunk, send it plus adjacent siblings. No side-store, predictable token cost |
+| **Neighbour expansion — chosen, not built** | Retrieve the chunk, send it plus adjacent siblings. No side-store, predictable token cost |
 | Parent-section expansion | Best grounding, but needs parent text stored outside the vector payload, and one large section can blow the latency budget |
 
 Parent expansion was the initial choice and then dropped: it requires keeping
 section text in a side store (storing it per-chunk would duplicate a section
 once per child), plus a size cap and a fallback for oversized sections.
 Neighbour expansion gets most of the grounding benefit with none of that, since
-neighbours are just other chunks already in Qdrant, fetched by a payload filter
-on (`doc_id`, `chunk_index` range) — no extra embedding work at query time. It
-does need overlapping windows merged, and the window clamped to `parent_id` so a
-neighbour from a different section can't mislead grounding.
+neighbours are just other chunks already in Qdrant — and because point ids are
+`uuid5(doc_id, chunk_index)`, they are fetched by key rather than by a filtered
+scan, with no extra embedding work at query time. It does need overlapping
+windows merged, and the window clamped to `parent_id` so a neighbour from a
+different section can't mislead grounding.
+
+**It is designed and deliberately not built.** Retrieval finds the right
+document for 18 of 18 golden questions, so there is no observed failure that a
+wider window would fix, and expansion would roughly triple the context tokens to
+buy it. The trigger is an eval case that answers wrongly *because the chunk was
+a fragment* — the same rule applied to the captioner and to re-ranking: measured
+failure, not preference. `parent_id` is already in the payload, so the work is
+ready to start the moment such a case appears.
 
 This composes well with Claude's native citations: citations resolve to spans
 *within* whatever block is sent, so an expanded window costs no attribution
@@ -462,7 +471,7 @@ just the newest.
 
 ### Guardrails — what is actually implemented
 
-Two layers, deliberately different in kind (`app/guardrails.py`):
+Two layers, deliberately different in kind (`api/rag/guardrails.py`):
 
 **1. Sanitising — deterministic, always applied.** Our prompt uses
 `<reference_documents>` and `<user_message>` as structure. Without this, a user
@@ -572,7 +581,7 @@ schema and the prompt, so a disabled branch costs no output tokens.
 
 ### Safety verdict and rewrite share one call
 
-The rewrite call also returns a safety verdict (`app/rag/query_analysis.py`):
+The rewrite call also returns a safety verdict (`api/rag/query_analysis.py`):
 `{safe, category, rewritten_query}` from a single structured-output request.
 
 **Why merged:** both jobs need the same input (question plus history) and both
@@ -580,7 +589,7 @@ must run before retrieval. Two serial calls would put two round trips ahead of
 the first token, on a budget that §7.2 already identifies as tight. One call
 does both.
 
-**Why an LLM check on top of `app/guardrails.py`:** the regex heuristics there
+**Why an LLM check on top of `api/rag/guardrails.py`:** the regex heuristics there
 are trivially rephrased around, and they deliberately never block. A model
 judging intent in context is a much better signal — good enough to act on.
 
@@ -605,7 +614,7 @@ The costs of that choice, taken deliberately:
   protocol errors.
 
 **The classifier is itself an injection target,** so the question and history are
-sanitised through `app/guardrails.py` before reaching it, and its system prompt
+sanitised through `api/rag/guardrails.py` before reaching it, and its system prompt
 states that a message asking to be marked safe is itself unsafe.
 
 **Not cached:** the classifier prompt is well under Haiku 4.5's 4096-token
@@ -649,7 +658,7 @@ and have different audiences, so they are kept apart rather than interleaved:
 - `app.performance` logger → **DEBUG**, `logs/performance.log` only, with
   `propagate = False` so timing noise never reaches the general log.
 
-`log_level` is a setting (`app/config.py`) and defaults to **DEBUG**, because
+`log_level` is a setting (`common/config.py`) and defaults to **DEBUG**, because
 the latency breakdown is a deliverable of this PoC rather than an optional
 extra.
 

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from app.rag.ingest.discovery import discover, hash_file
+from ingestion.discovery import discover, hash_file
 
 pytestmark = pytest.mark.ingest
 

@@ -3,8 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from app.config import get_settings
-from app.logging_config import (
+from common.logging_config import (
     APP_LOGGER,
     INGEST_LOGGER,
     PERFORMANCE_LOGGER,
@@ -15,20 +14,19 @@ SERVICE = "api"
 
 
 @pytest.fixture
-def log_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def log_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reconfigure) -> Path:
     """Point logging at a temp dir, then restore real handlers afterwards.
 
     Yields the service's own directory, since that is where the files land.
     """
     monkeypatch.setenv("LOG_DIR", str(tmp_path))
-    get_settings.cache_clear()
+    reconfigure()
     configure_logging(SERVICE)
     yield tmp_path / SERVICE
     for name in (APP_LOGGER, INGEST_LOGGER, PERFORMANCE_LOGGER):
         for handler in logging.getLogger(name).handlers:
             handler.close()
         logging.getLogger(name).handlers.clear()
-    get_settings.cache_clear()
 
 
 def test_files_land_in_a_per_service_directory(log_dir: Path) -> None:

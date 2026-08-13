@@ -16,7 +16,7 @@ import sys
 # the time this runs `sys.modules` says nothing about what the api pulled in.
 PROBE = """
 import sys
-import app.main  # noqa: F401
+import api.main  # noqa: F401
 print(",".join(sorted(m for m in sys.modules if m.startswith("docling"))))
 """
 

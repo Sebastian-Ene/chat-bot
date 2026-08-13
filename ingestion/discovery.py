@@ -10,7 +10,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.logging_config import INGEST_LOGGER
+from common.logging_config import INGEST_LOGGER
 
 logger = logging.getLogger(INGEST_LOGGER)
 

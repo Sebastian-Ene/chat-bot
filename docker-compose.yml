@@ -38,11 +38,12 @@ services:
       # Development mount: source is live-editable and logs land on the host.
       # An upper environment would drop this and run the code baked into the
       # image — see docs/considerations.md.
-      - ./app:/app/app
+      - ./api:/app/api
+      - ./common:/app/common
       - ./logs:/app/logs
     command:
       - uvicorn
-      - app.main:app
+      - api.main:app
       - --host
       - "0.0.0.0"
       - --port
@@ -76,7 +77,8 @@ services:
       # to demonstrate incremental ingestion. Read-only: the ingester parses
       # documents, it never writes them.
       - ./corpus/docs-initial:/corpus:ro
-      - ./app:/app/app
+      - ./ingestion:/app/ingestion
+      - ./common:/app/common
       - ./logs:/app/logs
     depends_on:
       qdrant:

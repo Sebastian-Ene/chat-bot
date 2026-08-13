@@ -5,15 +5,13 @@ from collections.abc import AsyncIterator, Callable
 
 import anthropic
 
-from app import anthropic_client
-from app.config import get_settings
-from app.guardrails import SYSTEM_PROMPT, guard
-from app.logging_config import APP_LOGGER, truncate
-from app.timings import TokenUsage
+from api.core.constants import ERROR_REPLY, GENERATION_MAX_TOKENS, SYSTEM_PROMPT
+from api.core.timings import TokenUsage
+from api.rag import anthropic_client
+from api.rag.guardrails import guard
+from api.core.config import get_settings
+from common.logging_config import APP_LOGGER, truncate
 
-MAX_TOKENS = 1024
-
-ERROR_REPLY = "Sorry — I could not reach the assistant just now. Please try again."
 
 # TODO: enable Claude's native citations once retrieval returns real chunks with
 # metadata, and fall back to a canned reply when a response carries none
@@ -47,6 +45,7 @@ async def stream_completion(
     context: list[str],
     history: list[dict[str, str]] | None = None,
     on_usage: Callable[[TokenUsage], None] | None = None,
+    on_error: Callable[[Exception], None] | None = None,
 ) -> AsyncIterator[str]:
     """Stream a reply grounded in the given context chunks.
 
@@ -56,6 +55,11 @@ async def stream_completion(
 
     No thinking and a small `max_tokens`: the 5s budget in requirements.md §7.2
     leaves little room, and `output_config.effort` errors on Haiku 4.5.
+
+    `on_error`, when given, receives the API error before the apology is
+    streamed. Failure is otherwise invisible to the caller — this generator
+    yields text either way — which would let an outage be recorded as a
+    successful answer.
     """
     prompt = _build_prompt(query, context)
     messages = [*_guard_history(history), {"role": "user", "content": prompt}]
@@ -72,7 +76,7 @@ async def stream_completion(
     try:
         async with anthropic_client.get_client().messages.stream(
             model=get_settings().anthropic_model,
-            max_tokens=MAX_TOKENS,
+            max_tokens=GENERATION_MAX_TOKENS,
             system=SYSTEM_PROMPT,
             messages=messages,
         ) as stream:
@@ -82,7 +86,10 @@ async def stream_completion(
                 # Only available once the stream is drained.
                 final = await stream.get_final_message()
                 on_usage(TokenUsage.from_sdk(getattr(final, "usage", None)))
-    except anthropic.APIError:
+    except anthropic.APIError as error:
+        logger.exception("generation failed — streaming the apology instead")
+        if on_error is not None:
+            on_error(error)
         # The response has already started, so this appends to whatever streamed
         # before the failure rather than replacing it.
         yield ERROR_REPLY

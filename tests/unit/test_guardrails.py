@@ -2,8 +2,9 @@ import logging
 
 import pytest
 
-from app.guardrails import SYSTEM_PROMPT, detect_injection, guard, sanitize
-from app.logging_config import APP_LOGGER
+from api.core.constants import SYSTEM_PROMPT
+from api.rag.guardrails import detect_injection, guard, sanitize
+from common.logging_config import APP_LOGGER
 
 
 class TestSanitize:

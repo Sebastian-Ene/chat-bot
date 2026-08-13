@@ -7,11 +7,11 @@ whether BGE-M3 works (that is `tests/ingest/test_embedding_model.py`).
 import pytest
 from qdrant_client import QdrantClient, models
 
-from app import vector_store
-from app.config import get_settings
-from app.embedding import Embedding
-from app.rag.retriever import RetrievalQueries, RetrievedChunk, retrieve
-from app.vector_store import DENSE_VECTOR, SPARSE_VECTOR, ensure_collection
+from api.rag.retriever import RetrievalQueries, RetrievedChunk, retrieve
+from common import vector_store
+from api.core.config import get_settings
+from common.embedding import Embedding
+from common.vector_store import DENSE_VECTOR, SPARSE_VECTOR, ensure_collection
 
 
 def test_branches_lists_only_populated_queries() -> None:
@@ -108,7 +108,7 @@ def seeded(monkeypatch: pytest.MonkeyPatch) -> QdrantClient:
     )
     monkeypatch.setattr(vector_store, "get_client", lambda: client)
     monkeypatch.setattr(
-        "app.rag.retriever.embed_documents",
+        "api.rag.retriever.embed_documents",
         lambda texts: [
             Embedding(dense=vector(1.0), sparse={7: 1.0}) for _ in texts
         ],
@@ -184,7 +184,7 @@ class TestDegradation:
         """Never ingested is not a crash — the generator says it cannot answer."""
         monkeypatch.setattr(vector_store, "get_client", lambda: QdrantClient(":memory:"))
         monkeypatch.setattr(
-            "app.rag.retriever.embed_documents",
+            "api.rag.retriever.embed_documents",
             lambda texts: [Embedding(dense=vector(1.0), sparse={}) for _ in texts],
         )
 
@@ -202,7 +202,7 @@ class TestDegradation:
 
         monkeypatch.setattr(vector_store, "get_client", lambda: Broken())
         monkeypatch.setattr(
-            "app.rag.retriever.embed_documents",
+            "api.rag.retriever.embed_documents",
             lambda texts: [Embedding(dense=vector(1.0), sparse={}) for _ in texts],
         )
 

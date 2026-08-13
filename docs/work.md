@@ -23,16 +23,18 @@
 - ~~Chat endpoint(s) serving the mocked responses, streamed~~
 - ~~Validate the chat message field (non-blank, length bounds)~~
 - ~~Extend `POST /api/chat` to accept prior turns; cap turn count and total length~~ (10 turns, 10 000 chars total, 4 000 per turn)
-- ~~Record TTFT and total completion per request, plus per-stage timers~~ (`app/timings.py`) — retrieval and generation are timed; rewrite/embed/search/expansion get timed as they are built, no collector change needed
-- ~~Split logging: ordinary logs at INFO, timings at DEBUG, separate files~~ (`app/logging_config.py`)
-- ~~API key and secret management: `.env` → OS env, no credentials in source~~ (`app/config.py`)
+- ~~Record TTFT and total completion per request, plus per-stage timers~~ (`api/core/timings.py`) — retrieval and generation are timed; rewrite/embed/search/expansion get timed as they are built, no collector change needed
+- ~~Split logging: ordinary logs at INFO, timings at DEBUG, separate files~~ (`common/logging_config.py`)
+- ~~API key and secret management: `.env` → OS env, no credentials in source~~ (`common/config.py`)
 - ~~Add `.env` to `.gitignore` and commit a placeholder `.env.example`~~
-- ~~API endpoint security: JWT embedded in the chat page, sent with every request, signature + TTL checked~~ (`app/security.py`) — opt-in per endpoint via `dependencies=[Depends(verify_token)]`; documented as a demonstration, not auth
-- ~~Validate and guard every turn, not just the latest~~ — validation in `app/routers/api.py` (shape, bounds, caps, leading-user rule), guarding in `app/guardrails.py` (question and every history turn, assistant turns included)
-- ~~Query rewrite step: structured output returning a query string, run before retrieval~~ (`app/rag/query_analysis.py`) — merged with an LLM safety verdict into one call; fails closed
+- ~~API endpoint security: JWT embedded in the chat page, sent with every request, signature + TTL checked~~ (`api/core/security.py`) — opt-in per endpoint via `dependencies=[Depends(verify_token)]`; documented as a demonstration, not auth
+- ~~Validate and guard every turn, not just the latest~~ — validation in `api/core/schemas.py` (shape, bounds, caps, leading-user rule), guarding in `api/rag/guardrails.py` (question and every history turn, assistant turns included)
+- ~~Query rewrite step: structured output returning a query string, run before retrieval~~ (`api/rag/query_analysis.py`) — merged with an LLM safety verdict into one call; fails closed
 - ~~Validate history against tampering~~ — the analysis call judges the whole conversation, not just the latest message, and refuses with `forged_history` when a prior assistant turn reads as fabricated. This is judgment, not integrity: a subtly-worded forgery can still pass, and that is accepted
 - ~~`retrieve()` returns chunks with metadata, not `list[str]`~~ — `RetrievedChunk` carries doc_id, pages, headings and `parent_id`
 - ~~Retrieve on original and rewritten query as separate `prefetch` branches, fused with RRF~~ — `RetrievalQueries` carries every branch; the mock is gone
+- ~~`GET /health` for the container probe~~ (`api/routers/health.py`) — unauthenticated; the HEALTHCHECK previously hit `/`, rendering the template and minting a JWT every 15s
+- ~~A failed generation is no longer logged as `answered`~~ — `stream_completion` reports the error via `on_error` and the flow logs `generation_failed`. The `X-Chat-Outcome` header still says `answered`: it is sent before the stream is iterated
 - ~~Query embedder off the event loop~~ — `anyio.to_thread`, one batched forward pass for all branches
 - ~~Load the embedder at api startup~~ — the first request otherwise paid 4 s of model load inside its own latency budget (12.7 s cold vs 3.6–5.0 s warm)
 
@@ -40,7 +42,7 @@
 
 --- Done ---
 - ~~Grow the input as the message gets long~~ — a `<textarea>` that auto-grows to ~5 lines then scrolls, so a pasted wall of text cannot squeeze the conversation off screen. Enter sends and Shift+Enter writes a newline, since a textarea's default would leave a chat box that needs the mouse to send
-- ~~Turn `app/templates/index.html` into an actual chat interface~~
+- ~~Turn `api/templates/index.html` into an actual chat interface~~
 - ~~JS chat widget consuming a streaming response from `/api/chat`~~
 - ~~Fix accessible color contrast on chat bubbles~~
 - ~~Fix chat title scrolling out of view during long conversations~~
@@ -64,87 +66,54 @@
 - ~~Generate the later batch of 5 docs~~ (`corpus/docs-later/`) — new topics, no contradictions; 5 `batch: later` golden questions must be declined before ingestion and answered after
 
 ## RAG — Read (ingestion)
-
-Lives in `app/rag/ingest/`. Produces an enriched `DoclingDocument` per document; chunking and indexing belong to RAG — Store.
-
-**Discovery and state**
+- **Image descriptions — deferred until the `image_only` questions are shown to fail.** Caption-first (`PictureItem.captions` → provenance `extracted`), generate the gaps with Docling's picture-description model, cache by image hash, write to `PictureItem.meta` before chunking. Three spike findings this pass must handle: HTML figures carry no image bytes (load them from the `<img src>`), DOCX captions are never associated, and a PDF caption can be OCR'd text from inside the image. Claude vision is the fallback if a generic caption cannot answer qa-005
+- Extend the run summary with picture counts and captions extracted vs generated, once that lands
+- Unit test the caption cache — fixtures only, no models
 
 --- Done ---
-- ~~Write all of a document's points in a **single upsert**~~ — atomically indexed at a hash or not at all; `state.py` reads that invariant back
-- ~~Act on the plan~~ — index `new` + `changed`, skip `unchanged`, delete the vectors of `deleted`; all four verified end to end against the running stack
-- ~~Recursive walk for `.pdf`/`.docx`/`.html` at any depth, stable ordering~~ (`app/rag/ingest/discovery.py`) — skips dotfiles and the golden answer key
+- ~~Recursive walk for `.pdf`/`.docx`/`.html` at any depth, stable ordering~~ (`ingestion/discovery.py`) — skips dotfiles and the golden answer key
 - ~~`doc_id` = path relative to the corpus root; `doc_content_hash` = SHA-256 of file bytes~~
-- ~~Work out what a run has to do~~ (`app/rag/ingest/state.py`) — read from the collection rather than a side file, so the record cannot disagree with the index; new/changed/unchanged/deleted, with a multi-hash document treated as a partial write and re-ingested
-- ~~Detect documents that disappeared~~ — they appear as `deleted` in the plan
-
-**Parse**
-
---- Done ---
-- ~~One Docling `DocumentConverter`, OCR on, table structure on, per-format options~~ (`app/rag/ingest/parse.py`) — built once per process; `generate_picture_images` on, or figure images are discarded and the caption stage has nothing to work with
+- ~~Work out what a run has to do~~ (`ingestion/state.py`) — read from the collection rather than a side file, so the record cannot disagree with the index; new/changed/unchanged/deleted, with a multi-hash document treated as a partial write and re-ingested
+- ~~Act on the plan~~ — index `new` + `changed`, skip `unchanged`, delete the vectors of `deleted`; all four verified end to end against the running stack
+- ~~Write all of a document's points in a **single upsert**~~ — atomically indexed at a hash or not at all; `state.py` reads that invariant back
+- ~~One Docling `DocumentConverter`, OCR on, table structure on, per-format options~~ (`ingestion/parse.py`) — built once per process; `generate_picture_images` on, or figure images are discarded and the caption stage has nothing to work with
 - ~~Wrap in a `ParsedDocument`~~ — `doc_id`, source format, content hash, page/table/picture counts and parse duration
 - ~~A document that fails to convert is logged at ERROR and skipped~~ — one malformed file must not block the corpus; it stays un-indexed and is retried next run. **Production would alert on these ERROR lines** so a document that never parses cannot fail silently
 - ~~No `lang` field~~ — nothing supplies it for free and BGE-M3 is multilingual, so retrieval does not need it
 - ~~`TORCHDYNAMO_DISABLE=1` before torch is imported~~ — set in every module that reaches torch; without a C compiler in the image, every conversion fails otherwise
 - ~~`page_no` only ever populates for PDF~~ — DOCX and HTML chunks carry an empty page list, and citations must tolerate that rather than treat it as an error
 - ~~A page-spanning table arrives as **two** table objects~~ — accepted, not worked around: each half chunks as a complete-looking table with its header repeated
-
-**Image descriptions** — *deferred, revisit after the pipeline is end-to-end.* Text and tables carry most of the corpus; images are an improvement on top. The `image_only` golden questions retrieve the right document today but nothing describes the figures, so the answers are not derivable yet.
-
-Blocking facts from the spikes, all of which this pass must handle:
-- HTML figures carry **no image bytes** — resolve the `<img src>` against the document's directory and load the file ourselves, or HTML figures can never be described
-- DOCX captions are **not associated** by Docling — accept generation for every DOCX figure, or parse the DOCX XML for the caption paragraph
-- A PDF `caption` can be **OCR'd text from inside the image** rather than the real caption — trust it as `extracted`, or gate it (e.g. require a `Figure`/`Abbildung` prefix)
-- Write descriptions to `PictureItem.meta` (`PictureMeta.description`, `created_by` carries provenance) — `annotations` works but is deprecated in docling-core 2.91
-
-The work itself:
-- Caption-first: `PictureItem.captions` present → provenance `extracted`
-- Generate for the gaps as our own pipeline stage (Docling's enrichment is PDF-only), using Docling's default picture-description model
-- Record provenance `extracted` / `generated` per image
-- Cache generated captions by image hash, in a gitignored cache directory
-- Write descriptions back into the `DoclingDocument` **before** chunking
-- Revisit the captioner if the `image_only` golden questions fail: a generic caption ("a line chart") cannot answer qa-005, which needs the figure read factually. Claude vision is the fallback and the trigger is measured failure, not preference
-
-**Orchestration**
-- Extend the run summary with picture counts and captions extracted vs generated once the image stage exists
-
---- Done ---
 - ~~Ingestion is a **job, not a service**~~ — it runs to completion, is started by an operator or a schedule, and takes minutes; that is a batch job, and it needs no network surface at all
-- ~~`run()` ties discovery, plan and parse together~~ (`app/rag/ingest/runner.py`) — returns a `RunReport`; indexing and vector deletion are a marked seam for RAG — Store, and the report does not claim documents were indexed
-- ~~`python -m app.rag.ingest` over the `CORPUS_DIR` setting~~ (`app/rag/ingest/__main__.py`) — `--force` re-processes everything, `--dry-run` prints the plan and stops. No directory argument: the root is a setting, so a run cannot be aimed at arbitrary host files
-- ~~Exit non-zero when a document failed to parse~~ — a scheduled run must not report success over a partially indexed corpus
-- ~~The ingester container is a one-shot job~~ — `docker compose run --rm ingest`, behind an `ingest` profile so `docker compose up` does not start it; no port, no healthcheck, no server
-
-**Tests**
-- Unit: caption cache — fixtures only, no models
-- Integration over two real corpus files, marked and kept out of the default suite like `e2e`
-
---- Done ---
+- ~~`run()` ties the pipeline together~~ (`ingestion/runner.py`) — discover → plan → parse → chunk → embed → index, one document at a time, returning a `RunReport`
+- ~~`python -m ingestion` over the `CORPUS_DIR` setting~~ (`ingestion/__main__.py`) — `--force` re-processes everything, `--dry-run` prints the plan and stops. No directory argument: the root is a setting, so a run cannot be aimed at arbitrary host files
+- ~~Exit non-zero when a document failed~~ — a scheduled run must not report success over a partially indexed corpus
+- ~~The ingest container is a one-shot job~~ — `docker compose run --rm ingest`, behind an `ingest` profile so `docker compose up` does not start it; no port, no healthcheck, no server
+- ~~Integration tests over real corpus files~~ — `tests/ingest/test_parse_documents.py` and `test_chunk_documents.py`, behind the `docling` marker and out of the default run
 - ~~Spike: does `PictureItem.image` yield image bytes for DOCX and HTML?~~ (`scripts/spikes/docling_pictures.py`) — PDF yes, DOCX yes, **HTML no**; DOCX captions are never associated, and a PDF caption can be OCR'd in-image text
 - ~~Spike: how does a picture reach the chunker?~~ (`scripts/spikes/docling_chunking.py`) — pictures do become chunks (merged with surrounding prose), `contextualize()` prepends the heading path, and a description on `PictureItem.meta` reaches the chunk text
 - ~~Add a DOCX figure to the corpus~~ — no DOCX carried an image, so the format's description path was untestable; `accessory-catalogue-en.docx` now has a captioned figure and `troubleshooting-zeitplan-de.docx` an uncaptioned one
 
 ## RAG — Store
-- Implement neighbour expansion: neighbour ids are computable from `uuid5(doc_id, chunk_index)`, so it is a keyed `retrieve()`, not a filtered scan; merge overlapping windows, clamp to `parent_id`. Note `point_id()` has to move out of `app/rag/ingest/index.py` first — that module imports docling, which must not reach the api
 
 --- Done ---
 - ~~Use Qdrant's embedded mode in unit tests~~ — `:memory:` throughout the collection, index and retriever tests, so real retrieval is exercised without Docker. Payload indexes are the one thing it ignores, so that assertion checks the call and was verified against the real server
-- ~~Chunk with `HybridChunker`~~ (`app/rag/ingest/chunk.py`) — BGE-M3's own tokenizer at `max_tokens=512`, table header repeated on overflow, peers merged. The tokenizer must be the embedder's: a chunk sized in someone else's tokens overflows silently at embed time
+- ~~Chunk with `HybridChunker`~~ (`ingestion/chunk.py`) — BGE-M3's own tokenizer at `max_tokens=512`, table header repeated on overflow, peers merged. The tokenizer must be the embedder's: a chunk sized in someone else's tokens overflows silently at embed time
 - ~~Embed `contextualize()` output, keep the raw text separately~~ — `embed_text` carries the heading path so a chunk is findable by its section; `text` is what reaches the LLM and the citation, since heading breadcrumbs in the prompt end up in the answer
 - ~~Corpus baseline~~ — 20 documents → **207 chunks** in 3.6 s (pdf 132, docx 40, html 35); median 90 tokens, mean 175, max 519. Chunking is negligible next to the 180 s parse
 - ~~The budget applies to the raw chunk, not `embed_text`~~ — Docling sizes the chunk then prepends the heading path, so 27 of 207 run up to 7 tokens over. Harmless (BGE-M3 takes 8192) but downstream code must not assume 512
-- ~~Embed with BGE-M3, dense + sparse~~ (`app/embedding.py`) — both from one forward pass, so hybrid costs one model. Sparse is BGE-M3's own learned lexical weights, not BM25. Shared by the job and the api: a query embedded differently from its chunks silently fails to retrieve them
+- ~~Embed with BGE-M3, dense + sparse~~ (`common/embedding.py`) — both from one forward pass, so hybrid costs one model. Sparse is BGE-M3's own learned lexical weights, not BM25. Shared by the job and the api: a query embedded differently from its chunks silently fails to retrieve them
 - ~~`FlagEmbedding` truncates at 512 by default~~ — `embed_max_tokens=1024` set explicitly, or the 27 over-budget chunks lose their tails with nothing in any log. A test asserts the setting stays above the chunk budget
 - ~~Embedding baseline~~ — 207 chunks in **13.7 s** (66 ms each), sparse terms median 52; **query embedding 33 ms**, negligible against the 5 s budget. Full ingestion is now ~194 s, still 93% parsing
 - ~~Cross-lingual retrieval verified~~ — English *and* German queries both land closer to the German chunk than to an unrelated English one, which is what justified dropping translation from the rewrite step
-- ~~Qdrant collection with named dense + sparse vectors~~ (`app/vector_store.py`) — both on one point, so a hybrid query prefetches each branch and fuses server-side; `doc_id` payload-indexed since every state read and delete filters on it. Verified against the real server, not just in-memory
+- ~~Qdrant collection with named dense + sparse vectors~~ (`common/vector_store.py`) — both on one point, so a hybrid query prefetches each branch and fuses server-side; `doc_id` payload-indexed since every state read and delete filters on it. Verified against the real server, not just in-memory
 - ~~Created by the ingest job, never the api~~ — an api that auto-creates an empty collection turns "never ingested" into "every question unanswerable"
-- ~~Dense distance is **dot**, not cosine~~ — identical while embeddings are unit-norm, and skips Qdrant's normalisation pass. It goes silently wrong if normalisation is ever turned off, so the embedding tests assert unit norm and `app/vector_store.py` carries the warning
+- ~~Dense distance is **dot**, not cosine~~ — identical while embeddings are unit-norm, and skips Qdrant's normalisation pass. It goes silently wrong if normalisation is ever turned off, so the embedding tests assert unit norm and `common/vector_store.py` carries the warning
 - ~~Refuse a collection built for a different embedding~~ — wrong width, wrong distance or a missing dense vector raises `CollectionMismatch` naming the fix, instead of mixing incompatible vectors and degrading retrieval quietly
-- ~~Index chunks as points~~ (`app/rag/ingest/index.py`) — `uuid5(doc_id, chunk_index)` ids so re-ingesting overwrites in place; payload carries the chunk text, so retrieval answers in one round trip and the api never needs the corpus mounted. `embed_text` is not stored — it exists only to be vectorised
+- ~~Index chunks as points~~ (`ingestion/index.py`) — `uuid5(doc_id, chunk_index)` ids so re-ingesting overwrites in place; payload carries the chunk text, so retrieval answers in one round trip and the api never needs the corpus mounted. `embed_text` is not stored — it exists only to be vectorised
 - ~~One upsert per document, `wait=True`~~ — the invariant `state.py` reads back: a document is present at a hash or absent, never half-written
 - ~~Replace a changed document new-points-first~~ — then delete points whose hash differs. A crash between the two leaves visible duplicates repaired next run; the reverse order would make the document vanish from retrieval. Also handles a new version with *fewer* chunks, which deterministic ids alone would leave stranded
 - ~~Documents deleted from disk have their points removed~~ — by `doc_id` filter, after the per-document loop
-- ~~Hybrid retrieval via the Query API~~ (`app/rag/retriever.py`) — every populated branch searched on **both** vector kinds, fused server-side with RRF in one request; `retrieve()` returns `RetrievedChunk` with provenance, not strings. Prefetch (20) is wider than top_k (5): RRF can only rank what the branches surfaced
+- ~~Hybrid retrieval via the Query API~~ (`api/rag/retriever.py`) — every populated branch searched on **both** vector kinds, fused server-side with RRF in one request; `retrieve()` returns `RetrievedChunk` with provenance, not strings. Prefetch (20) is wider than top_k (5): RRF can only rank what the branches surfaced
 - ~~Retrieval failure degrades, not 500s~~ — an unreachable Qdrant or missing collection logs ERROR and returns nothing; the generator then says it cannot answer
 - ~~Query embedding off the event loop~~ — one batched forward pass for every branch, via `anyio.to_thread`
 - ~~BGE-M3 in the api image~~ — `FlagEmbedding` moved to the main dependencies and the weights baked in; the api is no longer thin (507 MB → ~7 GB) because one model emits both vector kinds and must exist wherever a vector is produced. Docling stays out, now guarded by a test rather than by hand
@@ -153,20 +122,20 @@ The work itself:
 - ~~Process each document end to end~~ (`runner.ingest_document`) — parse → chunk → embed → index, one document at a time. `parse_all`/`chunk_all` removed: holding every parsed document and embedding in memory grows with the corpus for no benefit. A failure at any stage costs one document, and the ERROR names the doc_id *and* the stage, so it can be marked for retry or editing
 
 ## RAG — Generate
-- Enable citations on the generation call; fall back to a canned reply when a response carries none (TODO in `app/rag/llm.py`)
+- Enable citations on the generation call; fall back to a canned reply when a response carries none (TODO in `api/rag/llm.py`)
 - Assert `cache_read_input_tokens > 0` in a test — still blocked: Haiku 4.5's
   prompt-cache minimum is 4096 tokens and a real request now measures ~2 900
   input tokens for generation, so the prefix is still short of it. Neighbour
   expansion may push it over
 
 --- Done ---
-- ~~Implement prompt guardrails on user input~~ (`app/guardrails.py`):
+- ~~Implement prompt guardrails on user input~~ (`api/rag/guardrails.py`):
     - ~~Protection against prompt injection~~ — sanitising always applied; detection logged, never blocking
     - ~~Clear system instructions and role separation~~
     - ~~Constraints keeping responses aligned with the knowledge base~~
     - ~~Cover every history turn, not just the current question~~
-- ~~Integrate the LLM via API, replacing the mocked responses~~ (`app/rag/llm.py`)
-- ~~Keep model configuration in one place~~ (`app/config.py`)
+- ~~Integrate the LLM via API, replacing the mocked responses~~ (`api/rag/llm.py`)
+- ~~Keep model configuration in one place~~ (`common/config.py`) — split per deployment unit: `Settings` holds what both sides read, `ApiSettings` and `IngestSettings` add their own. `common/` owns no instance; each entrypoint injects its child via `configure()`. The ingest job no longer needs an Anthropic key or JWT secret, so neither Dockerfile carries placeholder credentials
 - ~~Do not use `output_config.effort` — it errors on Haiku 4.5~~
 
 ## Ops / Packaging
@@ -175,12 +144,12 @@ The work itself:
 - Package the whole project as a single zip for delivery
 
 --- Done ---
-- ~~Connect to Qdrant at api startup and fail fast if unreachable~~ (`app/vector_store.py`) — verified in the container: `qdrant connected url=http://qdrant:6333`
+- ~~Connect to Qdrant at api startup and fail fast if unreachable~~ (`common/vector_store.py`) — verified in the container: `qdrant connected url=http://qdrant:6333`
 - ~~Add the **ingest** image~~ (`Dockerfile.ingester`) — docling and torch present there and absent from the api, `/corpus` mounted read-only with all 20 documents visible
 - ~~`docker-compose.yml` with qdrant, no load balancer~~ — api + qdrant up and healthy, qdrant storage on a named volume
 - ~~Docker image builds via `uv`~~ (`Dockerfile.api`) — multi-stage, non-root, venv outside `/app` so the dev bind mount cannot shadow it
-- ~~Keep Docling out of the api image~~ — it stays in the `ingest` dependency group; verified absent from the built image and guarded by `tests/api/test_image_boundary.py`. The api is 5.82 GB regardless, because BGE-M3 lives there
-- ~~Mount the working tree in dev so logs land on the host~~ — `./app` and `./logs` bind-mounted, `--reload` enabled
+- ~~Keep Docling out of the api image~~ — it stays in the `ingest` dependency group; verified absent from the built image and guarded by `tests/api/test_image_boundary.py`. The api is 16.4 GB regardless, because BGE-M3 and torch's CUDA wheels live there
+- ~~Mount the working tree in dev so logs land on the host~~ — `./api`, `./common`, `./ingestion` and `./logs` bind-mounted, `--reload` enabled
 - ~~Model weights baked into both images~~ — immutable, no runtime download, read-only at runtime, no cache volume anywhere. The api additionally loads BGE-M3 at startup so the first question does not pay for it
 - ~~Verify `docker compose up` gives a working app with no manual DB setup~~ — re-verified with real retrieval: a German question about error code F250 returned the right answer from `fehlercode-referenz-de.pdf` with page numbers, correlated to the container by request id
 
@@ -196,6 +165,7 @@ The work itself:
 - ~~Unit tests for the mocked RAG functions and API tests for `POST /api/chat`~~
 
 ## Deferred (only if time allows)
+- **Neighbour expansion** — retrieve the chunk, send it plus adjacent siblings. Deferred until the eval harness produces answers that are wrong *because a chunk was a fragment*: retrieval already finds the right document 18/18, so expansion currently has no failure to fix, and it would triple the context tokens to buy that. Trigger is measured failure, not preference. When it lands: neighbour ids are computable from `uuid5(doc_id, chunk_index)`, so it is a keyed `retrieve()` rather than a filtered scan; merge overlapping windows and clamp to `parent_id`. `point_id()` has to move out of `ingestion/index.py` first — that module imports docling, which must not reach the api
 - Re-ranking
 - Multi-turn eval cases
 - Conflict/recency test in the corpus: a document superseding an earlier one with different numbers, plus golden questions on which version applies

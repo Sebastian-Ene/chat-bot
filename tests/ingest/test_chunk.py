@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from app.rag.ingest.chunk import Chunk, chunk, get_chunker
+from ingestion.chunk import Chunk, chunk, get_chunker
 
 pytestmark = pytest.mark.ingest
 
@@ -68,7 +68,7 @@ def chunker(monkeypatch: pytest.MonkeyPatch):
             return " > ".join([*(doc_chunk.meta.headings or []), doc_chunk.text])
 
     fake = FakeChunker()
-    monkeypatch.setattr("app.rag.ingest.chunk.get_chunker", lambda: fake)
+    monkeypatch.setattr("ingestion.chunk.get_chunker", lambda: fake)
     return fake
 
 
@@ -141,8 +141,8 @@ def test_chunker_is_built_once(monkeypatch: pytest.MonkeyPatch) -> None:
             calls.append(kwargs)
             return cls()
 
-    monkeypatch.setattr("app.rag.ingest.chunk.HuggingFaceTokenizer", FakeTokenizer)
-    monkeypatch.setattr("app.rag.ingest.chunk.HybridChunker", lambda **_kwargs: object())
+    monkeypatch.setattr("ingestion.chunk.HuggingFaceTokenizer", FakeTokenizer)
+    monkeypatch.setattr("ingestion.chunk.HybridChunker", lambda **_kwargs: object())
 
     get_chunker()
     get_chunker()
@@ -165,12 +165,12 @@ def test_chunker_is_sized_in_the_embedding_models_tokens(
             calls.append(kwargs)
             return cls()
 
-    monkeypatch.setattr("app.rag.ingest.chunk.HuggingFaceTokenizer", FakeTokenizer)
-    monkeypatch.setattr("app.rag.ingest.chunk.HybridChunker", lambda **_kwargs: object())
+    monkeypatch.setattr("ingestion.chunk.HuggingFaceTokenizer", FakeTokenizer)
+    monkeypatch.setattr("ingestion.chunk.HybridChunker", lambda **_kwargs: object())
 
     get_chunker()
 
-    from app.config import get_settings
+    from ingestion.config import get_settings
 
     assert calls[0]["model_name"] == get_settings().embedding_model
     assert calls[0]["max_tokens"] == get_settings().chunk_max_tokens

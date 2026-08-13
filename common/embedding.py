@@ -21,8 +21,8 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
 from FlagEmbedding import BGEM3FlagModel  # noqa: E402
 
-from app.config import get_settings  # noqa: E402
-from app.logging_config import APP_LOGGER  # noqa: E402
+from common.config import get_settings  # noqa: E402
+from common.logging_config import APP_LOGGER  # noqa: E402
 
 logger = logging.getLogger(APP_LOGGER)
 

@@ -2,8 +2,8 @@ import re
 
 from fastapi.testclient import TestClient
 
-from app.main import app
-from app.security import verify_token
+from api.core.security import verify_token
+from api.main import app
 
 client = TestClient(app)
 

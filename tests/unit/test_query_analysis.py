@@ -1,17 +1,15 @@
 import anthropic
 import pytest
 
-from app.config import get_settings
-from app.rag.query_analysis import (
-    MAX_KEYWORDS,
-    MAX_SUB_QUERIES,
-    MAX_TOKENS,
+from api.core.constants import ANALYSIS_MAX_TOKENS, MAX_KEYWORDS, MAX_SUB_QUERIES
+from api.rag.query_analysis import (
     AnalysisUnavailable,
     QueryAnalysis,
     analyse_query,
     response_schema,
     system_prompt,
 )
+from api.core.config import get_settings
 from tests.fake_anthropic import (
     STUBBED_KEYWORDS,
     STUBBED_REWRITE,
@@ -21,7 +19,7 @@ from tests.fake_anthropic import (
 
 
 def _use(client: FakeAnthropic, monkeypatch: pytest.MonkeyPatch) -> FakeAnthropic:
-    monkeypatch.setattr("app.anthropic_client.get_client", lambda: client)
+    monkeypatch.setattr("api.rag.anthropic_client.get_client", lambda: client)
     return client
 
 
@@ -47,7 +45,7 @@ async def test_sends_the_configured_model_and_a_json_schema(
     call = stub_anthropic.messages.create_calls[0]
     assert call["model"] == get_settings().anthropic_model
     assert call["system"] == system_prompt()
-    assert call["max_tokens"] == MAX_TOKENS
+    assert call["max_tokens"] == ANALYSIS_MAX_TOKENS
     assert call["output_config"]["format"]["type"] == "json_schema"
     assert call["output_config"]["format"]["schema"]["additionalProperties"] is False
 
@@ -173,10 +171,17 @@ class TestConversationLevelSafety:
 class TestBranchFlags:
     """Keywords and sub-queries are unproven, so they must be switchable off."""
 
-    def _configure(self, monkeypatch: pytest.MonkeyPatch, keywords: str, sub: str) -> None:
+    def _configure(
+        self, monkeypatch: pytest.MonkeyPatch, reconfigure, keywords: str, sub: str
+    ) -> None:
+        """Set the flags, then re-inject so the settings pick them up.
+
+        No teardown needed: the autouse `settings` fixture resets after every
+        test, and monkeypatch undoes the environment.
+        """
         monkeypatch.setenv("REWRITE_KEYWORDS_ENABLED", keywords)
         monkeypatch.setenv("REWRITE_SUB_QUERIES_ENABLED", sub)
-        get_settings.cache_clear()
+        reconfigure()
 
     def test_both_enabled_by_default(self) -> None:
         schema = response_schema()
@@ -185,49 +190,47 @@ class TestBranchFlags:
         assert "sub_queries" in schema["properties"]
 
     def test_disabling_drops_them_from_the_schema(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, reconfigure
     ) -> None:
-        self._configure(monkeypatch, "false", "false")
+        self._configure(monkeypatch, reconfigure, "false", "false")
 
         schema = response_schema()
 
         assert "keywords" not in schema["properties"]
         assert "sub_queries" not in schema["properties"]
         assert schema["required"] == ["safe", "category", "rewritten_query"]
-        get_settings.cache_clear()
 
     def test_disabling_drops_them_from_the_prompt(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, reconfigure
     ) -> None:
-        self._configure(monkeypatch, "false", "false")
+        self._configure(monkeypatch, reconfigure, "false", "false")
 
         prompt = system_prompt()
 
         assert "Keywords." not in prompt
         assert "Sub-queries." not in prompt
-        get_settings.cache_clear()
 
-    def test_flags_are_independent(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self._configure(monkeypatch, "true", "false")
+    def test_flags_are_independent(
+        self, monkeypatch: pytest.MonkeyPatch, reconfigure
+    ) -> None:
+        self._configure(monkeypatch, reconfigure, "true", "false")
 
         schema = response_schema()
 
         assert "keywords" in schema["properties"]
         assert "sub_queries" not in schema["properties"]
-        get_settings.cache_clear()
 
     @pytest.mark.anyio
     async def test_a_disabled_branch_simply_yields_no_values(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, reconfigure
     ) -> None:
-        self._configure(monkeypatch, "false", "false")
+        self._configure(monkeypatch, reconfigure, "false", "false")
         _use(FakeAnthropic(analysis={"safe": True, "category": "", "rewritten_query": "q"}), monkeypatch)
 
         analysis = await analyse_query("what is the refund window?")
 
         assert analysis.keywords == []
         assert analysis.sub_queries == []
-        get_settings.cache_clear()
 
 
 class TestListHygiene:

@@ -13,10 +13,9 @@ from datetime import UTC, datetime, timedelta
 import jwt
 from fastapi import HTTPException, Request, status
 
-from app.config import get_settings
-from app.logging_config import APP_LOGGER
-
-ALGORITHM = "HS256"
+from api.core.constants import JWT_ALGORITHM
+from api.core.config import get_settings
+from common.logging_config import APP_LOGGER
 
 logger = logging.getLogger(APP_LOGGER)
 
@@ -27,7 +26,7 @@ def issue_token() -> str:
     now = datetime.now(UTC)
     payload = {"iat": now, "exp": now + timedelta(seconds=settings.jwt_ttl_seconds)}
     return jwt.encode(
-        payload, settings.jwt_secret.get_secret_value(), algorithm=ALGORITHM
+        payload, settings.jwt_secret.get_secret_value(), algorithm=JWT_ALGORITHM
     )
 
 
@@ -53,7 +52,7 @@ def verify_token(request: Request) -> None:
         jwt.decode(
             token,
             get_settings().jwt_secret.get_secret_value(),
-            algorithms=[ALGORITHM],
+            algorithms=[JWT_ALGORITHM],
         )
     except jwt.ExpiredSignatureError:
         raise _unauthorized("token expired") from None

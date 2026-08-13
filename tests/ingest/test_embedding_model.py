@@ -11,9 +11,9 @@ import math
 
 import pytest
 
-from app.config import get_settings
-from app.embedding import embed_documents, embed_query
-from app.rag.ingest.chunk import get_chunker
+from common.config import get_settings
+from common.embedding import embed_documents, embed_query
+from ingestion.chunk import get_chunker
 
 pytestmark = [pytest.mark.ingest, pytest.mark.embedding]
 
