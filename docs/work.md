@@ -14,10 +14,10 @@
 
 ## Backend
 - Bound the query embedder with a semaphore — it runs off the event loop, but nothing caps how many concurrent requests can be embedding at once, and each one is CPU-bound
-- Produce a latency breakdown to present, not just pass/fail against 5s — raw per-request breakdown lands in `logs/api/performance.log`; the presentable summary comes with the eval harness. Measured warm: total 3.6–5.0 s, of which analysis 1.1–2.0 s, retrieval 0.5–1.3 s, generation 1.1–3.5 s
-- Document any additional security considerations
 
 --- Done ---
+- ~~Document any additional security considerations~~ — `docs/considerations.md` → Security: secrets via `.env`, ingestion's absent inbound surface (no path argument, read-only corpus) and its new *outbound* egress since figure description, and why the page token is a demonstration rather than authentication
+- ~~Produce a latency breakdown to present, not just pass/fail against 5s~~ — `scripts/eval_golden.py` joins each answer to the api's own per-stage timings on `X-Request-ID` and reports median/p95/max per stage, in the console and the Markdown report. Answered requests only: a refusal never reaches retrieval or generation. Degrades to nothing when the log is absent (DEBUG-only, and a remote `--base-url` has no local log)
 - ~~Create b-e with Python (FastAPI)~~
 - ~~Mock RAG/LLM responses so the API contract exists before real RAG is wired in~~
 - ~~Chat endpoint(s) serving the mocked responses, streamed~~
@@ -66,11 +66,12 @@
 - ~~Generate the later batch of 5 docs~~ (`corpus/docs-later/`) — new topics, no contradictions; 5 `batch: later` golden questions must be declined before ingestion and answered after
 
 ## RAG — Read (ingestion)
-- **Image descriptions — the trigger has fired.** `qa-005` and `qa-007` both decline: their values exist only as plotted lines, and OCR reads text *inside* figures but not the plot. The third `image_only` question still passes on labels alone. Caption-first (`PictureItem.captions` → provenance `extracted`), generate the gaps with Docling's picture-description model, cache by image hash, write to `PictureItem.meta` before chunking. Three spike findings this pass must handle: HTML figures carry no image bytes (load them from the `<img src>`), DOCX captions are never associated, and a PDF caption can be OCR'd text from inside the image. Claude vision is the fallback if a generic caption cannot answer qa-005
-- Extend the run summary with picture counts and captions extracted vs generated, once that lands
-- Unit test the caption cache — fixtures only, no models
 
 --- Done ---
+- ~~Image descriptions~~ (`ingestion/describe.py`) — Claude vision via Docling's `PictureDescriptionApiOptions` + `api_image_request`, pointed at Anthropic's OpenAI-compatible endpoint; written to `PictureItem.meta` before chunking, cached by image hash so re-ingestion and `--force` cost nothing. Took `qa-005` and `qa-007` from declining to correct. Docling's *own* enrichment is PDF-only, which is why the request is driven by us: HTML figures carry no image bytes and are loaded from `<img src>` relative to the document
+- ~~Prompt for transcription, not captioning~~ — "list every series and its value at each labelled position". A generic caption cannot answer `qa-005`, whose value exists only as a plotted point. Haiku transcribed the −10 °C series exactly; the neighbouring series drifted 1–3 points and one annotation was attributed to the wrong curve, so treat descriptions as searchable text rather than a data source
+- ~~Extend the run summary with picture counts and descriptions generated vs cached~~ — `described=` and `cached=` on the per-document line
+- ~~Unit test the caption cache — fixtures only, no models~~ (`tests/ingest/test_describe.py`) — cache round-trip, corrupt-file tolerance, content-addressed hashing, and HTML `<img src>` resolution
 - ~~Recursive walk for `.pdf`/`.docx`/`.html` at any depth, stable ordering~~ (`ingestion/discovery.py`) — skips dotfiles and the golden answer key
 - ~~`doc_id` = path relative to the corpus root; `doc_content_hash` = SHA-256 of file bytes~~
 - ~~Work out what a run has to do~~ (`ingestion/state.py`) — read from the collection rather than a side file, so the record cannot disagree with the index; new/changed/unchanged/deleted, with a multi-hash document treated as a partial write and re-ingested
@@ -162,7 +163,8 @@
 
 --- Done ---
 - ~~Decide: how to demonstrate/measure answer accuracy~~ — the golden set graded by an LLM judge, scored as two figures: the ingested corpus, and the not-yet-ingested batch that must be declined
-- ~~Build the eval harness~~ (`scripts/eval_golden.py`) — 26 questions against a running api, non-zero exit on any failure. Baseline **19/21** on the corpus and **3/5** declining the later batch, with recall@5 **17/18** and MRR **0.880**; findings in `docs/considerations.md` → Improvements. Answer latency median 4.6 s, slowest 13.3 s — the median sits just inside the 5 s budget and the tail does not
+- ~~Build the eval harness~~ (`scripts/eval_golden.py`) — 26 questions against a running api, non-zero exit on any failure. **21/21** on the corpus and **3/5** declining the later batch, with recall@5 **18/18** and MRR **0.931**; findings in `docs/considerations.md` → Improvements. Answer latency median 2.9 s, slowest 5.3 s. The `3/5` is correct behaviour, not a gap: `qa-101` and `qa-105` answer from documents that are in the ingested corpus, and become expected-answer questions once `docs-later` is ingested
+- ~~Judge on `claude-opus-5`, not the app's Haiku~~ — Haiku graded three correct answers wrong in one run (accurate extra detail, and a well-formed decline — both allowed by the rubrics), moving the score 21/21 → 18/21 with no change to the system under test. 26 calls per eval, so cost is not a reason to downgrade it
 - ~~Add retrieval metrics to the harness~~ — `--retrieval` scores recall@k and MRR over the production path (`analyse_query()` then every branch it produces), so the figure covers the retriever as actually served. Separate opt-in pass: answer correctness needs only HTTP, this needs Qdrant and loads BGE-M3 locally
 - ~~Reports land in `logs/common/`~~ — `golden_qa.json` for machines, `golden_qa.md` for people: scores, per-question tables, and a detail block per question merging both passes, so a failure reads without cross-referencing. Both gitignored as run output
 - ~~Set up Playwright (`pytest-playwright`) e2e testing with an accessible-role/text locator convention~~

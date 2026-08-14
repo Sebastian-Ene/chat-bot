@@ -154,12 +154,18 @@ off would be a free speedup. Kept on anyway because OCR reads text rendered
 which the captioner does not reliably transcribe. The two complement each other
 on exactly the figures that matter.
 
-### Images — caption-first, generate only the gaps
+### Images — describe every figure from its pixels
 
-Goal: every image ends up with an indexed, referenceable text description. Use
-the caption the document already carries; only generate one when there isn't
-one. The source of an existing description is **`PictureItem.captions`** — the
-visible "Figure N: …" text Docling's layout analysis associates with the figure.
+Goal: every image ends up with an indexed, referenceable text description.
+
+This started as caption-first — reuse `PictureItem.captions`, the visible
+"Figure N: …" text, and generate only for figures without one. That was
+abandoned once the evidence arrived: a caption names what a figure *is*, and
+retrieval needs what it *contains*. Both questions the figures exist to answer
+(`qa-005`, `qa-007`) need values that appear nowhere but inside the image, so a
+caption would have short-circuited exactly the figures that needed describing.
+Every figure is now described from pixels. The reasoning that shaped the rest of
+the design is kept below, since the Docling constraints it records still hold.
 This works across all three formats and needs no extra code.
 
 **Accessibility metadata is deliberately out of scope.** An earlier version of
@@ -189,20 +195,24 @@ rather than Docling's enrichment pipeline. Upside: the captioner model becomes a
 free choice instead of one constrained by Docling's OpenAI-shaped API
 integration.
 
-- **Provenance:** record `extracted` vs `generated` per description. Cheap, and
-  it lets the evaluation answer whether generated captions actually help
-  retrieval or just add noise — the evidence that would justify upgrading the
-  captioner.
-- **Model:** start with Docling's default picture-description model. It is small
-  and its captions are generic ("a bar chart") rather than factual ("return
-  rates by product category, electronics highest at 12%"), and only the latter
-  is retrievable. Accepted for now under the upgrade-on-evidence policy. The
-  caption-first design also means it only runs on the minority of images that
-  lack a visible caption.
-- **Cache captions by image hash.** A few hundred images at CPU vision-model
-  speeds is plausibly 30–60 minutes of ingest; re-running that every iteration
-  would make development miserable, and hash-keyed caching fits the incremental
-  ingestion design anyway.
+What was built (`ingestion/describe.py`) differs from the caption-first sketch
+above on one point, deliberately:
+
+- **Always describe from pixels — never short-circuit on an embedded caption.**
+  A caption says what a figure *is*; retrieval needs what it *contains*. The
+  caption on the installation-guide wiring diagram would not have answered
+  `qa-005` or `qa-007`, whose values exist only inside the image. Describing
+  every figure costs one vision call each, once, and the cache makes it a
+  one-off — a small price for answers that are otherwise unreachable. It also
+  removes the `extracted` vs `generated` provenance split, since everything is
+  generated.
+- **Model:** Claude vision (`describe_model`, Haiku by default) rather than a
+  local VLM. The local models are not installed and would add 0.5–6 GB to an
+  18.3 GB image; more decisively, their captions are generic ("a bar chart")
+  where only the factual form is retrievable. Prompted to transcribe series
+  values, not to caption.
+- **Cache by image hash.** Re-ingestion and `--force` re-describe nothing, which
+  matters because parsing already dominates a run at ~180 s.
 
 ### Spike results — what Docling actually gives us
 
@@ -694,6 +704,12 @@ What remains:
 - **No path argument** — the root is the `CORPUS_DIR` setting, fixed at startup,
   so a run cannot be aimed at arbitrary files on the host.
 - **Corpus mounted read-only** — the job parses documents, it never writes them.
+- **Outbound egress since figure description.** Nothing listens, but the job now
+  *sends*: figure images go to the Anthropic API to be described, so document
+  content leaves the machine and ingestion is no longer fully offline. The key
+  is optional (`IngestSettings.anthropic_api_key`), so an air-gapped run stays
+  possible by omitting it — figures are then skipped and the run still
+  succeeds. For a corpus with confidential figures, that is the switch to use.
 
 ### API tokens — a demonstration, not authentication
 
@@ -813,15 +829,37 @@ line each, heading tagged `fixed` / `open`:
 - **Left** — the other 7 `table_only` questions pass throughout, so this is row
   precision at worst, not table handling in general.
 
-### Figure data points are unreachable — open
+### Figure data points are unreachable — fixed
 
-- **Broke** — `qa-005` (battery ~40% at 15 months) and `qa-007` (busiest
-  weekday) both declined; both values exist only as plotted lines.
-- **Why** — no picture-description stage. `generate_picture_images` is on and
-  OCR reads text *inside* figures, so labels resolve but plotted values do not.
-- **Fix** — build the caption stage in `docs/work.md`, which was explicitly
-  deferred "until the `image_only` questions are shown to fail". They now do.
-- **Left** — the third `image_only` question passes on OCR'd labels alone.
+- **Broke** — `qa-005` (battery ~40 % at 15 months) and `qa-007` (busiest
+  weekday) both declined. A figure with no caption and no description is
+  *dropped entirely*: the battery PDF produced 11 chunks and none was the chart.
+- **Why** — no description stage, so nothing existed to merge into prose. OCR
+  reads text *inside* figures, but a plotted point is not text; and HTML figures
+  never reached the pipeline at all, since Docling carries no image bytes for
+  them.
+- **Fix** — `ingestion/describe.py`: Claude vision through Docling's
+  `PictureDescriptionApiOptions` + `api_image_request` against Anthropic's
+  OpenAI-compatible endpoint, written to `PictureItem.meta` before chunking and
+  cached by image hash. Prompted to transcribe series values, not caption.
+  Driven by us rather than Docling's enrichment, which is PDF-only; HTML figures
+  load from `<img src>`. Both questions now answer correctly.
+- **Left** — descriptions are searchable text, not a data source: the series
+  `qa-005` needs came out exactly, but a neighbouring series drifted 1–3 points
+  and one annotation was attributed to the wrong curve. Ingestion now takes an
+  optional `ANTHROPIC_API_KEY`; without it figures are skipped and the run still
+  succeeds. Anthropic documents the compatibility layer as not production-ready.
+
+### An over-strict judge outscored the system it graded — fixed
+
+- **Broke** — the harness reported 18/21 where the app had answered 21/21: it
+  marked correct answers wrong for adding accurate detail and for a well-formed
+  decline, both explicitly allowed by the rubrics.
+- **Why** — the judge had been moved to `claude-haiku-4-5` for cost.
+- **Fix** — back to `claude-opus-5`, with a comment saying why. 26 calls per
+  eval; cost is not a reason to downgrade it.
+- **Left** — an LLM judge is still a measurement instrument with its own error.
+  Read the reasons on any verdict that surprises you before believing the score.
 
 ### Answer assembled from unrelated rows — open
 

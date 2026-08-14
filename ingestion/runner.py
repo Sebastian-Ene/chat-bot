@@ -26,6 +26,7 @@ from ingestion.config import get_settings  # noqa: E402
 from common.embedding import embed_documents  # noqa: E402
 from common.logging_config import INGEST_LOGGER  # noqa: E402
 from ingestion.chunk import chunk  # noqa: E402
+from ingestion.describe import describe_pictures  # noqa: E402
 from ingestion.discovery import DiscoveredDocument, discover  # noqa: E402
 from ingestion.index import delete_documents, delete_stale, index_document  # noqa: E402
 from ingestion.parse import parse  # noqa: E402
@@ -80,6 +81,12 @@ def ingest_document(client: QdrantClient, document: DiscoveredDocument) -> int:
     try:
         parsed = parse(document)
 
+        # Before chunking: a description on the picture is folded into the
+        # chunk text, and a figure with neither caption nor description is
+        # dropped entirely.
+        stage = "describe"
+        described = describe_pictures(parsed.document, document.path, document.doc_id)
+
         stage = "chunk"
         chunks = chunk(parsed)
         if not chunks:
@@ -101,12 +108,14 @@ def ingest_document(client: QdrantClient, document: DiscoveredDocument) -> int:
         ) from error
 
     logger.info(
-        "ingested %s chunks=%d pages=%d tables=%d pictures=%d",
+        "ingested %s chunks=%d pages=%d tables=%d pictures=%d described=%d cached=%d",
         document.doc_id,
         written,
         parsed.page_count,
         parsed.table_count,
         parsed.picture_count,
+        described.described,
+        described.cached,
     )
     return written
 

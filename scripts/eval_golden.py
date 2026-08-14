@@ -45,10 +45,21 @@ from api.core.config import ApiSettings
 from common.config import configure
 from scripts.corpus import paths
 
-JUDGE_MODEL = "claude-haiku-4-5"
+# Opus, not the app's Haiku: Haiku judged over-strictly, marking correct answers
+# wrong for adding accurate detail the rubric allows and for a well-formed
+# decline. A judge that is noisier than the system it grades is worse than no
+# judge. It runs 26 times per eval, so the cost is a rounding error.
+JUDGE_MODEL = "claude-opus-5"
 DEFAULT_REPORT = Path("logs/common/golden_qa.json")
 DEFAULT_MARKDOWN = DEFAULT_REPORT.with_suffix(".md")
 TOKEN_META = re.compile(r'name="chat-token" content="([^"]+)"')
+DEFAULT_PERF_LOG = Path("logs/api/performance.log")
+# `... DEBUG app.performance [a3c790e8] message_length=82 ... analysis_ms=1234.54 ...`
+PERF_LINE = re.compile(r"app\.performance \[([0-9a-f]+)\]")
+PERF_FIELD = re.compile(r"(\w+)=([\d.]+|None)")
+
+# Reported in this order; anything else in the line is left to the raw log.
+STAGES = ("analysis", "retrieval", "generation")
 
 VERDICT_SCHEMA = {
     "type": "object",
@@ -106,7 +117,7 @@ def get_token(client: httpx.Client, base: str) -> str:
     return match.group(1)
 
 
-def ask(client: httpx.Client, base: str, token: str, question: str) -> tuple[str, str, float]:
+def ask(client: httpx.Client, base: str, token: str, question: str) -> tuple[str, str, str, float]:
     started = time.perf_counter()
     response = client.post(
         f"{base}/api/chat",
@@ -115,7 +126,40 @@ def ask(client: httpx.Client, base: str, token: str, question: str) -> tuple[str
         timeout=180.0,
     )
     response.raise_for_status()
-    return response.text.strip(), response.headers.get("X-Chat-Outcome", "?"), time.perf_counter() - started
+    return (
+        response.text.strip(),
+        response.headers.get("X-Chat-Outcome", "?"),
+        # Joins this answer to its per-stage timings in the performance log.
+        response.headers.get("X-Request-ID", ""),
+        time.perf_counter() - started,
+    )
+
+
+def read_performance(path: Path) -> dict[str, dict[str, float]]:
+    """Per-stage timings from the api's performance log, keyed by request id.
+
+    The api already measures every stage; re-deriving them from the client would
+    only reproduce the total. This reads what it wrote and joins on the request
+    id the response carries.
+
+    Best effort by design: the log is DEBUG-only, and a remote api's log is not
+    on this machine. Missing timings cost a section of the report, nothing more.
+    """
+    if not path.is_file():
+        return {}
+    found: dict[str, dict[str, float]] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        match = PERF_LINE.search(line)
+        if not match:
+            continue
+        fields = {
+            key: float(value)
+            for key, value in PERF_FIELD.findall(line)
+            if value not in {"None", ""}
+        }
+        if fields:
+            found[match.group(1)] = fields
+    return found
 
 
 def judge(client: anthropic.Anthropic, item: dict, actual: str) -> dict:
@@ -188,7 +232,12 @@ def _detail(results: list[dict], retrieval: list[dict]) -> list[str]:
 
 
 def write_markdown(
-    path: Path, results: list[dict], retrieval: list[dict], base_url: str, top_k: int
+    path: Path,
+    results: list[dict],
+    retrieval: list[dict],
+    perf: dict[str, dict[str, float]],
+    base_url: str,
+    top_k: int,
 ) -> None:
     """The same figures the run prints, as a readable document.
 
@@ -224,6 +273,21 @@ def write_markdown(
             "",
             f"Latency: median {seconds[len(seconds) // 2]:.1f}s, slowest {seconds[-1]:.1f}s",
             "",
+        ]
+
+        if rows := latency_rows(results, perf):
+            out += [
+                "Per-stage, from the api's own timings joined on `X-Request-ID` "
+                "(answered requests only — a refusal never reaches retrieval or "
+                "generation):",
+                "",
+                "| stage | median | p95 | max |",
+                "| --- | --- | --- | --- |",
+                *[f"| {label} | {med:.2f}s | {p95:.2f}s | {worst:.2f}s |" for label, med, p95, worst in rows],
+                "",
+            ]
+
+        out += [
             "| id | type | lang | outcome | verdict | s |",
             "| --- | --- | --- | --- | --- | --- |",
         ]
@@ -387,6 +451,45 @@ def report_retrieval(rows: list[dict], top_k: int) -> None:
             print(f"       got  {', '.join(row['retrieved']) or '(nothing)'}")
 
 
+def latency_rows(results: list[dict], perf: dict[str, dict[str, float]]) -> list[tuple[str, float, float, float]]:
+    """(label, median, p95, max) in seconds, for each stage and the totals.
+
+    Only answered requests carry stage timings — a refusal never reaches
+    retrieval or generation, so including them would drag every median down.
+    """
+    matched = [perf[rid] for r in results if (rid := r.get("request_id")) and rid in perf]
+    if not matched:
+        return []
+
+    def spread(key: str) -> tuple[str, float, float, float] | None:
+        values = sorted(m[key] / 1000 for m in matched if key in m)
+        if not values:
+            return None
+        index95 = min(int(len(values) * 0.95), len(values) - 1)
+        return key.removesuffix("_ms"), values[len(values) // 2], values[index95], values[-1]
+
+    keys = [f"{stage}_ms" for stage in STAGES] + ["ttft_ms", "total_ms"]
+    return [row for row in (spread(k) for k in keys) if row]
+
+
+def report_latency(results: list[dict], perf: dict[str, dict[str, float]]) -> None:
+    rows = latency_rows(results, perf)
+    if not rows:
+        return
+    matched = [perf[rid] for r in results if (rid := r.get("request_id")) and rid in perf]
+    print(f"\n--- latency breakdown (n={len(matched)} with stage timings) ---")
+    print(f"  {'stage':<12} {'median':>8} {'p95':>8} {'max':>8}")
+    for label, median, p95, worst in rows:
+        print(f"  {label:<12} {median:>7.2f}s {p95:>7.2f}s {worst:>7.2f}s")
+    tokens_in = sorted(m["tokens_in"] for m in matched if "tokens_in" in m)
+    tokens_out = sorted(m["tokens_out"] for m in matched if "tokens_out" in m)
+    if tokens_in:
+        print(
+            f"  {'tokens':<12} median in {tokens_in[len(tokens_in) // 2]:.0f}, "
+            f"out {tokens_out[len(tokens_out) // 2]:.0f}"
+        )
+
+
 def report(results: list[dict]) -> int:
     def tally(predicate) -> tuple[int, int]:
         rows = [r for r in results if predicate(r)]
@@ -436,6 +539,12 @@ def main(argv: list[str] | None = None) -> int:
         help=f"where to write the readable report (default: {DEFAULT_MARKDOWN})",
     )
     parser.add_argument(
+        "--performance-log",
+        type=Path,
+        default=DEFAULT_PERF_LOG,
+        help=f"api performance log, joined by request id (default: {DEFAULT_PERF_LOG})",
+    )
+    parser.add_argument(
         "--retrieval",
         action="store_true",
         help="also measure recall@k and MRR (needs Qdrant and loads BGE-M3 locally)",
@@ -458,7 +567,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.answers:
         write_report(args.json_out, {"retrieval": retrieval})
-        write_markdown(args.markdown, [], retrieval, args.base_url, settings.retrieval_top_k)
+        write_markdown(args.markdown, [], retrieval, {}, args.base_url, settings.retrieval_top_k)
         report_retrieval(retrieval, settings.retrieval_top_k)
         print(f"\n  report           {args.json_out}\n                   {args.markdown}")
         return 0
@@ -468,7 +577,7 @@ def main(argv: list[str] | None = None) -> int:
     with httpx.Client() as http:
         token = get_token(http, args.base_url)
         for index, item in enumerate(items, 1):
-            actual, outcome, elapsed = ask(http, args.base_url, token, item["question"])
+            actual, outcome, request_id, elapsed = ask(http, args.base_url, token, item["question"])
             verdict = judge(judge_client, item, actual)
             results.append(
                 {
@@ -476,6 +585,7 @@ def main(argv: list[str] | None = None) -> int:
                     "expected": item["expected_answer"],
                     "actual": actual,
                     "outcome": outcome,
+                    "request_id": request_id,
                     "seconds": round(elapsed, 1),
                     "must_decline": must_decline(item),
                     **verdict,
@@ -485,12 +595,17 @@ def main(argv: list[str] | None = None) -> int:
             label = "must decline" if must_decline(item) else item["type"]
             print(f"{index:2}/{len(items)} {item['id']} {mark} ({label}, {elapsed:.1f}s)", flush=True)
 
-    write_report(args.json_out, {"answers": results, "retrieval": retrieval} if retrieval else results)
-    write_markdown(args.markdown, results, retrieval, args.base_url, settings.retrieval_top_k)
+    # Joined after the run: the api writes a line per request as it finishes.
+    perf = read_performance(args.performance_log)
+
+    payload = {"answers": results, "retrieval": retrieval} if retrieval else results
+    write_report(args.json_out, payload)
+    write_markdown(args.markdown, results, retrieval, perf, args.base_url, settings.retrieval_top_k)
 
     status = report(results)
     if retrieval:
         report_retrieval(retrieval, settings.retrieval_top_k)
+    report_latency(results, perf)
     print(f"\n  report           {args.json_out}\n                   {args.markdown}")
     return status
 

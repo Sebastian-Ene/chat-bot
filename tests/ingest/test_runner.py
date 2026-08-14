@@ -5,6 +5,7 @@ what to do when one document goes wrong, not parsing or embedding.
 """
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from qdrant_client import QdrantClient
@@ -199,7 +200,10 @@ class TestIngestDocument:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Some documents legitimately hold nothing chunkable."""
-        monkeypatch.setattr("ingestion.runner.parse", lambda _document: object())
+        # `.document.pictures` is what the describe stage reads; empty means it
+        # returns without reaching settings or the network.
+        parsed = SimpleNamespace(document=SimpleNamespace(pictures=[]))
+        monkeypatch.setattr("ingestion.runner.parse", lambda _document: parsed)
         monkeypatch.setattr("ingestion.runner.chunk", lambda _parsed: [])
 
         assert ingest_document(None, document("empty.pdf")) == 0

@@ -72,6 +72,9 @@ services:
       CORPUS_DIR: /corpus
       # No HF_HOME and no model cache volume here: the ingester's models are
       # baked into its image, and a volume mounted over them would hide them.
+      # ANTHROPIC_API_KEY arrives via env_file and is optional: it buys figure
+      # descriptions. The cache for those lands under the ./logs mount, since
+      # /corpus is read-only.
     volumes:
       # The initial set is the ingestion root; the later batch is copied in here
       # to demonstrate incremental ingestion. Read-only: the ingester parses
