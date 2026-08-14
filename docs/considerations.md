@@ -1,17 +1,27 @@
 # Considerations
 
 > **What this document is.** The development narrative — the decisions taken,
-> why they were taken, what was rejected and what trade-offs were accepted. This
-> is the document intended for presentation.
+> why they were taken, what was rejected and what trade-offs were accepted. It
+> is the *why* behind `docs/requirements.md`, which records the *what*. Section
+> references point back to it. Tasks live in `docs/work.md`.
 >
-> It is the *why* behind `docs/requirements.md`, which records the *what*.
-> Section references point back to it. Tasks live in `docs/work.md`.
+> **Not the presentation path.** Start at the [README](../README.md), which
+> leads to `architecture.md`, `design-decisions.md` and `technologies.md` — the
+> summaries. This is the depth behind them: read it when a summary line raises
+> "why that way?", or read **Known issues** and **Improvements** on their own,
+> which are the two sections that stand without the narrative.
 
 A recurring policy runs through most of these decisions: **take the cheapest
 option that could work, and upgrade only on measured evidence.** It applies to
 the embedding model, the image captioner and the LLM. The cost of that policy is
 that it requires an evaluation harness to be actionable — which is why the
 accuracy question is the last open one and has the most riding on it.
+
+> **Reading this after the fact.** Sections below are written in the order the
+> decisions were taken and are left as they were, so the reasoning survives
+> alongside what it got wrong. Where reality diverged, an **Update** note says
+> so in place — the wrong call and the correction are both worth more than a
+> tidied-up account of neither.
 
 ## Scope
 
@@ -55,6 +65,13 @@ otherwise IO-bound. It is the better production shape and it was not built here:
 a third service and an HTTP contract buy nothing on one machine, where the hop
 costs more than it saves and in-process embedding already answers in 33 ms.
 
+> **Update.** The api image finished at **16.4 GB**, not ~7 GB — torch's CUDA
+> wheels, not the weights, are the bulk. And the embedder-service argument has
+> since been closed as won't-do on its own merits (embedding is ~1% of a
+> request), then reopened from the other end: adding a re-ranker would put a
+> *third* model in the request path, which is what actually justifies splitting
+> model inference into its own service. See Known issues #3.
+
 **Ingestion is a job, not a service** — `docker compose run --rm ingest`. It
 runs to completion, is started by an operator or a schedule, and takes minutes;
 nothing remote needs to start a run, since documents arrive by being placed in
@@ -75,6 +92,10 @@ an accidental import fails the suite rather than the container.
 The api container mounts `./app` and `./logs` from the host, so code is
 live-editable under `--reload` and logs are readable without entering the
 container.
+
+> **Update.** `app/` was split into `api/`, `common/` and `ingestion/`, so the
+> mounts are now `./api`, `./common`, `./ingestion` and `./logs`. The deferral
+> stands and is recorded as Known issues #4.
 
 That is a **development** choice, not the shipping shape. An upper environment
 runs the code baked into the image — no source mount, no `--reload` — so what
@@ -98,6 +119,13 @@ The full specification is in requirements §4.
 The same principle applies to the golden Q&A set: questions whose answers live
 only in a table or only in a chart image are the ones that prove the pipeline
 works.
+
+> **Update.** It grew to **two sets, 51 questions**: `golden_qa_0` (26, the
+> original types) and `golden_qa_1` (25, written later against the same corpus —
+> conditional, derivation, enumeration, exclusion, precedence, procedural). The
+> second set is where the harder failures surfaced, which is the argument for
+> writing questions *after* the pipeline works rather than only alongside it.
+> The self-set-exam trap remains unsolved either way — Known issues #2.
 
 ### Corpus size — ~25 documents
 
@@ -393,6 +421,19 @@ a fragment* — the same rule applied to the captioner and to re-ranking: measur
 failure, not preference. `parent_id` is already in the payload, so the work is
 ready to start the moment such a case appears.
 
+> **Update — two changes to this section.**
+>
+> **Tables are no longer flattened by Docling's default serialiser.** The
+> triplet form keys every cell on the first column and runs the whole table into
+> one paragraph, which made `qa-001` answer from the row above the right one.
+> Tables now serialise as markdown — one row per line, and 28% cheaper in
+> tokens. See Improvements, *Table answers read the neighbouring row*.
+>
+> **Neighbour expansion was never built**, and the trigger above never fired.
+> The cheap half of the same effect came from raising `retrieval_top_k` 5 → 10
+> instead, which fixed the two multi-document questions that were failing. Now
+> Known issues #7.
+
 **Sequencing trap:** caption generation has to happen **before** chunking. The
 chunker attaches captions to chunks, so a generated caption must be written back
 into the `DoclingDocument` first. Get the order wrong and images that had no
@@ -407,6 +448,14 @@ what tells us whether that is good enough — it is the trigger for reconsiderin
 This also removed re-ranking as a justification for the staged corpus batches
 (+5, then +10). Those still earn their place by demonstrating incremental
 ingestion.
+
+> **Update.** The trigger fired. The evaluation says retrieval is not the
+> problem — answerable scores 42/42 — but *declining* is: 4 of 9 must-decline
+> questions were answered with a figure lifted from adjacent context, because
+> nothing checks that a chunk answers the question rather than resembling it.
+> Re-ranking is now warranted rather than deferred, and it stays unbuilt for
+> scope reasons only. The full argument, including why it pulls model inference
+> into its own service and what pays for the latency, is Known issues #3.
 
 ## Generation
 
@@ -652,6 +701,20 @@ rewrite call earns its place, and whether BGE-M3 on CPU is the bottleneck.
 synchronous. Called directly from an async handler they block the event loop and
 the concurrency requirement quietly fails under load. They need a thread pool
 behind a bounded semaphore, or a separate process.
+
+> **Update — what the breakdown actually said.** Median total 3.39 s, p95
+> 4.97 s, slowest 5.86 s; TTFT median 2.68 s. Per stage: analysis 1.27 s,
+> retrieval 0.56 s, generation 1.38 s. The prediction held — TTFT carries most
+> of the pipeline, and the unconditional rewrite is the largest stage after
+> generation.
+>
+> It settled the three deferred decisions it was built to inform. BGE-M3 on CPU
+> is *not* the bottleneck (retrieval is 0.56 s including search, and the
+> semaphore item closed as won't-do). The rewrite call does earn its place on
+> accuracy — but at 1.27 s on every request it is also the only slack left, so
+> it is what pays for re-ranking if re-ranking is ever added. Re-ranking's cost
+> is therefore affordable only by spending the rewrite: p95 is already 4.97 s
+> against a 5 s target.
 
 ### Logging — two streams, split by file
 
@@ -954,19 +1017,23 @@ line each, heading tagged `fixed` / `open`:
 - **Left** — intermittent (Haiku), so watch the refusal rate, not the case. A
   schema `enum` on `category` would make invention impossible.
 
-### Table answers read the neighbouring row — intermittent
+### Table answers read the neighbouring row — fixed
 
 - **Broke** — `qa-001`: business returns answered "no restocking fee"; the row
   below says 15% for opened-but-complete. Twice running, then correct on the
   third with the same document at rank 1.
-- **Why** — unsettled. Chunking flattens the table and `doc3_warranty.py` keeps
-  these values in a table only, so a neighbouring row is easy to pick up; but
-  two identical failures were not enough to call it deterministic, and the
-  shorter analysis prompt landed between run two and run three.
-- **Fix** — none, deliberately. Watch it: if it recurs, keep table rows
-  addressable through chunking rather than flattening them.
-- **Left** — the other 7 `table_only` questions pass throughout, so this is row
-  precision at worst, not table handling in general.
+- **Why** — the cause was the serialisation, not the model. Docling's default
+  `TripletTableSerializer` writes one `<row key>, <column> = <value>` clause per
+  cell into a single run-on paragraph, keyed on the **first** column only. Rows
+  have no boundary, and "Business, Restocking fee = None" (unopened) sits one
+  clause before "Business, Restocking fee = 15%" (opened, complete).
+- **Fix** — tables are serialised as markdown (`ingestion/chunk.py`): one row
+  per line under named columns, so rows differing only in a later column stay
+  distinguishable. Also *cheaper* — 325 tokens against 454 on the returns table,
+  since triplets repeat the row key and column name for every cell.
+- **Left** — none on this case: `qa-001` and all 5 `table_only` questions pass,
+  and answerable scored 42/42 on the verifying run. The corpus was re-ingested
+  (208 → 201 chunks), which is required for the change to take effect.
 
 ### Figure data points are unreachable — fixed
 
@@ -1020,8 +1087,3 @@ line each, heading tagged `fixed` / `open`:
   *Over-answering* below, where the wider context gives more plausible-but-wrong
   material to assemble from.
 
-### Answer assembled from unrelated rows — superseded
-
-`qa-101` built a retention policy out of error-code rows K564–K568 that merely
-mention a 30-day window. It was the first instance of what is now **Known issues
-#10** — three more cases have since appeared, and the analysis lives there.

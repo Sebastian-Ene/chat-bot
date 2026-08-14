@@ -10,7 +10,7 @@ One line of reasoning each; the long form is in `docs/considerations.md`.
 | **One model for both vectors** (BGE-M3) | Hybrid costs one model and one forward pass, with no second lexical path to hand-roll | 2.3 GB in both images |
 | **Prefetch 20, top-k 10** | RRF can only rank what the branches surfaced, so the shortlist is wider than the cut | Context tokens grow with k |
 | **Original query always a branch** | A rewrite that drifts cannot retrieve worse than the raw question | One extra branch per request |
-| **No re-ranking** | Out of scope for the PoC — but now warranted, not deferred | Nothing checks a chunk *answers* rather than resembles, which is what over-answering is made of |
+| **No re-ranking** | This is the one thing I would change based on the results. | My current setup would does not have enough storage and memory to run an additional model. |
 | **No neighbour expansion** | No answer yet fails *because* a chunk was a fragment | Fragments stay possible; k=10 is the cheap mitigation |
 
 ## Ingestion
@@ -33,7 +33,6 @@ One line of reasoning each; the long form is in `docs/considerations.md`.
 | **Safety verdict + rewrite in one call** | Both jobs, one round trip, before retrieval | A single call to fail closed on |
 | **Fails closed** | No usable verdict means refuse — never generate ungoverned | A model outage becomes a refusal |
 | **Streamed** | TTFT is what the user feels, and the rewrite already spends time before it | Outcome must be settled before headers go out |
-| **No citations** | Out of scope | No provenance in answers; logs keep it |
 | **No prompt caching** | The only shared prefix is a ~264-token system prompt, under Haiku's 4096 floor | None |
 
 ## Backend
@@ -64,7 +63,7 @@ Both golden sets, 51 questions, k=10, markdown tables, figures described.
 | | |
 |---|---|
 | Answerable | **42/42** |
-| Must decline | 5/9 — the weak axis, see Known issues #3 |
+| Must decline | 5/9 — the weak axis, see Known issues #10 |
 | Corpus total | 45/46 |
 | Retrieval recall@10 | 41/42, MRR 0.826 |
 | Latency | median 3.4 s, p95 4.97 s, slowest 5.9 s |
