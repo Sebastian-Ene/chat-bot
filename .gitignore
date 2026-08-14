@@ -7,6 +7,9 @@ __pycache__/
 # non-root user, and Docker creates a missing bind-mount source as root — so a
 # clone without these directories cannot start.
 logs/**/*.log*
+# Eval reports land beside the logs and are run output, not source.
+logs/**/*.json
+logs/**/*.md
 # Generated figures: build inputs. PDFs/DOCX embed them, and HTML documents get
 # their own copy in the output tree.
 scripts/corpus/images/

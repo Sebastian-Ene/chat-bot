@@ -776,3 +776,61 @@ The `install-deps` step needs interactive sudo (apt-get under the hood), so
 it can't be run non-interactively/by an agent — a human has to run it once
 per machine. See `.claude/skills/e2e-testing/SKILL.md` for locator
 conventions used in these tests.
+
+## Improvements
+
+Measured failures and their fixes; speculative ideas go in `docs/work.md`. One
+line each, heading tagged `fixed` / `open`:
+
+- **Broke** — the symptom, and what surfaced it
+- **Why** — the cause
+- **Fix** — what changed
+- **Left** — residual risk or the next lever; omit when there is none
+
+### Safety classifier invented a refusal category — fixed
+
+- **Broke** — `scripts/eval_golden.py`: a benign shipping question refused as
+  `category=unclear_scope`, not one of the four the prompt names. Fails closed,
+  so it never reached retrieval.
+- **Why** — nothing told the model the category list was closed.
+- **Fix** — the prompt names the four as a closed set, and marks unclear or
+  undocumented questions safe: "not in the documentation" is retrieval's answer
+  to give, not the classifier's.
+- **Left** — intermittent (Haiku), so watch the refusal rate, not the case. A
+  schema `enum` on `category` would make invention impossible.
+
+### Table answers read the neighbouring row — intermittent
+
+- **Broke** — `qa-001`: business returns answered "no restocking fee"; the row
+  below says 15% for opened-but-complete. Twice running, then correct on the
+  third with the same document at rank 1.
+- **Why** — unsettled. Chunking flattens the table and `doc3_warranty.py` keeps
+  these values in a table only, so a neighbouring row is easy to pick up; but
+  two identical failures were not enough to call it deterministic, and the
+  shorter analysis prompt landed between run two and run three.
+- **Fix** — none, deliberately. Watch it: if it recurs, keep table rows
+  addressable through chunking rather than flattening them.
+- **Left** — the other 7 `table_only` questions pass throughout, so this is row
+  precision at worst, not table handling in general.
+
+### Figure data points are unreachable — open
+
+- **Broke** — `qa-005` (battery ~40% at 15 months) and `qa-007` (busiest
+  weekday) both declined; both values exist only as plotted lines.
+- **Why** — no picture-description stage. `generate_picture_images` is on and
+  OCR reads text *inside* figures, so labels resolve but plotted values do not.
+- **Fix** — build the caption stage in `docs/work.md`, which was explicitly
+  deferred "until the `image_only` questions are shown to fail". They now do.
+- **Left** — the third `image_only` question passes on OCR'd labels alone.
+
+### Answer assembled from unrelated rows — open
+
+- **Broke** — `qa-101`: a retention policy stated as fact, built from error-code
+  rows K564–K568 that mention a 30-day deletion window. The real policy (24
+  months) is in `docs-later`, which is not ingested.
+- **Why** — retrieval surfaced genuinely matching text; nothing checks the
+  chunks answer the question rather than merely sharing its vocabulary.
+- **Fix** — none yet. Re-ranking (deferred above) or a grounding check on the
+  drafted answer.
+- **Left** — the other four not-yet-ingested questions declined correctly, so
+  this is partial coverage, not a blanket failure.
