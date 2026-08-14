@@ -137,14 +137,41 @@ def get_token(client: httpx.Client, base: str) -> str:
     return match.group(1)
 
 
-def ask(client: httpx.Client, base: str, token: str, question: str) -> tuple[str, str, str, float]:
+class PageToken:
+    """The page token, re-mintable.
+
+    Held rather than passed as a string because it expires: `JWT_TTL_SECONDS`
+    defaults to 1800 and a full run over both sets takes longer than that.
+    """
+
+    def __init__(self, client: httpx.Client, base: str) -> None:
+        self._client, self._base = client, base
+        self.value = get_token(client, base)
+
+    def refresh(self) -> None:
+        self.value = get_token(self._client, self._base)
+
+
+def ask(
+    client: httpx.Client, base: str, token: PageToken, question: str
+) -> tuple[str, str, str, float]:
     started = time.perf_counter()
-    response = client.post(
-        f"{base}/api/chat",
-        json={"message": question},
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=180.0,
-    )
+
+    def post() -> httpx.Response:
+        return client.post(
+            f"{base}/api/chat",
+            json={"message": question},
+            headers={"Authorization": f"Bearer {token.value}"},
+            timeout=180.0,
+        )
+
+    response = post()
+    if response.status_code == 401:
+        # A full run outlives the token's TTL (30 min by default), and it
+        # expired 42 questions in once — losing the whole run's results.
+        print("  page token expired, minting a fresh one")
+        token.refresh()
+        response = post()
     response.raise_for_status()
     return (
         response.text.strip(),
@@ -427,6 +454,13 @@ async def measure_retrieval(items: list[dict]) -> list[dict]:
     """Recall and rank for each question, over the production query path."""
     from api.rag.query_analysis import analyse_query
     from api.rag.retriever import RetrievalQueries, retrieve
+    from common.embedding import get_embedder
+
+    # The api loads BGE-M3 at startup; this pass runs in its own process and
+    # would otherwise load it inside the first `retrieve()`, charging one
+    # question ~6 s of model load and making the per-question table a lie.
+    print("loading the embedder...")
+    await anyio.to_thread.run_sync(get_embedder)
 
     rows = []
     for index, item in enumerate(items, 1):
@@ -628,7 +662,7 @@ def main(argv: list[str] | None = None) -> int:
     judge_client = anthropic.Anthropic()
 
     with httpx.Client() as http:
-        token = get_token(http, args.base_url)
+        token = PageToken(http, args.base_url)
         for index, item in enumerate(items, 1):
             actual, outcome, request_id, elapsed = ask(http, args.base_url, token, item["question"])
             verdict = judge(judge_client, item, actual)

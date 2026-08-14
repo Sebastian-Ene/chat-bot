@@ -11,13 +11,28 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 import jwt
-from fastapi import HTTPException, Request, status
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from api.core.constants import JWT_ALGORITHM
 from api.core.config import get_settings
 from common.logging_config import APP_LOGGER
 
 logger = logging.getLogger(APP_LOGGER)
+
+# Declared as a security scheme rather than read off the raw request, so it
+# reaches the OpenAPI schema and `/docs` grows an Authorize button. `auto_error`
+# is off because the scheme's own rejection is a bare 403 — this module raises
+# its own 401 with `WWW-Authenticate`, and logs why.
+bearer_scheme = HTTPBearer(
+    auto_error=False,
+    scheme_name="PageToken",
+    description=(
+        "Short-lived HS256 token embedded in the chat page. Load `/` and copy "
+        "the token out of the HTML to try an endpoint here. Not authentication: "
+        "anyone who can load the page gets one."
+    ),
+)
 
 
 def issue_token() -> str:
@@ -40,17 +55,18 @@ def _unauthorized(reason: str) -> HTTPException:
     )
 
 
-def verify_token(request: Request) -> None:
+def verify_token(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> None:
     """FastAPI dependency — attach to one endpoint with `Depends(verify_token)`,
     or to every endpoint on a router with `dependencies=[Depends(verify_token)]`.
     """
-    scheme, _, token = request.headers.get("Authorization", "").partition(" ")
-    if scheme.lower() != "bearer" or not token:
+    if credentials is None or not credentials.credentials:
         raise _unauthorized("missing or malformed Authorization header")
 
     try:
         jwt.decode(
-            token,
+            credentials.credentials,
             get_settings().jwt_secret.get_secret_value(),
             algorithms=[JWT_ALGORITHM],
         )

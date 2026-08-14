@@ -12,10 +12,6 @@ from api.rag.guardrails import guard
 from api.core.config import get_settings
 from common.logging_config import APP_LOGGER, truncate
 
-
-# TODO: enable Claude's native citations once retrieval returns real chunks with
-# metadata, and fall back to a canned reply when a response carries none
-# (requirements.md §6.3).
 logger = logging.getLogger(APP_LOGGER)
 
 def _build_prompt(query: str, context: list[str]) -> str:

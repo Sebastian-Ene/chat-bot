@@ -11,6 +11,9 @@ chunks are upserted before the previous version's are deleted. A crash between
 the two leaves duplicates, which are visible in the collection and repaired on
 the next run; the reverse order would leave a window where the document has
 silently vanished from retrieval.
+
+Staleness is judged on the content hash *and* the chunk count. The hash alone
+misses re-chunking an unchanged file — see `delete_stale`.
 """
 import logging
 import uuid
@@ -96,6 +99,7 @@ def delete_stale(
     client: QdrantClient,
     doc_id: str,
     keep_hash: str,
+    chunk_count: int,
     collection: str | None = None,
 ) -> int:
     """Remove points for `doc_id` left over from an earlier version.
@@ -103,14 +107,28 @@ def delete_stale(
     Deterministic ids overwrite chunk-for-chunk, so this only matters when the
     new version has *fewer* chunks than the old — otherwise the tail of the
     previous version would survive as orphaned, unreachable context.
+
+    A point is stale on *either* count. The hash catches a changed file. The
+    chunk index catches the case the hash cannot see: the file is byte-identical
+    but re-chunking produced fewer chunks, which is what a serialiser or
+    tokenizer change does to every document at once on `--force`.
     """
     collection = collection or get_settings().qdrant_collection
     stale = models.Filter(
         must=[models.FieldCondition(key="doc_id", match=models.MatchValue(value=doc_id))],
-        must_not=[
+        # `must` and `should` together mean: this document, and stale by at
+        # least one of the two measures.
+        should=[
+            models.Filter(
+                must_not=[
+                    models.FieldCondition(
+                        key="doc_content_hash", match=models.MatchValue(value=keep_hash)
+                    )
+                ]
+            ),
             models.FieldCondition(
-                key="doc_content_hash", match=models.MatchValue(value=keep_hash)
-            )
+                key="chunk_index", range=models.Range(gte=chunk_count)
+            ),
         ],
     )
 

@@ -175,24 +175,44 @@ class TestReplacingADocument:
         write(client, [chunk(index=i, content_hash="old") for i in range(3)])
 
         write(client, [chunk(index=0, content_hash="new")])
-        delete_stale(client, "a.pdf", "new", COLLECTION)
+        delete_stale(client, "a.pdf", "new", 1, COLLECTION)
 
         remaining = stored(client)
         assert len(remaining) == 1
         assert remaining[0].payload["doc_content_hash"] == "new"
 
+    def test_a_shorter_rechunk_of_an_unchanged_file_leaves_no_orphans(
+        self, client
+    ) -> None:
+        """The hash cannot see this one: the file is byte-identical and only the
+        chunking changed, which is what a serialiser or tokenizer change does."""
+        write(client, [chunk(index=i, content_hash="same") for i in range(3)])
+
+        write(client, [chunk(index=0, content_hash="same")])
+        removed = delete_stale(client, "a.pdf", "same", 1, COLLECTION)
+
+        assert removed == 2
+        assert [p.payload["chunk_index"] for p in stored(client)] == [0]
+
     def test_other_documents_are_untouched(self, client) -> None:
         write(client, [chunk(doc_id="b.pdf", content_hash="other")])
         write(client, [chunk(content_hash="new")])
 
-        delete_stale(client, "a.pdf", "new", COLLECTION)
+        delete_stale(client, "a.pdf", "new", 1, COLLECTION)
 
         assert {p.payload["doc_id"] for p in stored(client)} == {"a.pdf", "b.pdf"}
+
+    def test_a_longer_new_version_keeps_every_chunk(self, client) -> None:
+        """The guard is `>= chunk_count`, so growing must not delete the tail."""
+        write(client, [chunk(index=i, content_hash="same") for i in range(3)])
+
+        assert delete_stale(client, "a.pdf", "same", 3, COLLECTION) == 0
+        assert len(stored(client)) == 3
 
     def test_nothing_stale_is_a_no_op(self, client) -> None:
         write(client, [chunk(content_hash="new")])
 
-        assert delete_stale(client, "a.pdf", "new", COLLECTION) == 0
+        assert delete_stale(client, "a.pdf", "new", 1, COLLECTION) == 0
 
 
 class TestDeletingDocuments:

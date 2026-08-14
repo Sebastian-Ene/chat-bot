@@ -59,7 +59,7 @@ polish. Explicitly a PoC, not a production system.
       → embed (original + rewritten)
       → Qdrant hybrid search (dense + sparse prefetch, RRF)
       → neighbour expansion
-      → Claude generation with citations, streamed to the client
+      → Claude generation, streamed to the client
 
 **Ingestion pipeline:**
 
@@ -201,8 +201,11 @@ because the PoC needs it.
 ### 6.3 Generation
 
 - LLM integrated via API — **Claude Haiku 4.5** (`claude-haiku-4-5`)
-- Responses use Claude's native **citations**, so answers carry verifiable
-  provenance back to source chunks
+- **No citations.** Answers are plain text and do not carry provenance back to
+  source chunks. Retrieved chunks reach the model flattened rather than as
+  document blocks, and the system prompt tells it not to mention the reference
+  documents. Provenance exists in the logs (`RetrievedChunk.citation()`), not in
+  the answer. Out of scope, not deferred
 - **Model API constraints on Haiku 4.5:**
   - `output_config.effort` errors — not available as a latency dial
   - thinking is `{"type": "enabled", "budget_tokens": N}` or `"disabled"`;
@@ -320,9 +323,9 @@ quality. No specific metric mandated by the brief.
 
 ## 10. Documentation & AI Usage Transparency
 
-Mandatory deliverables: architecture overview, key design decisions and
-trade-offs, and the chosen models/tools/technologies — all covered by
-`docs/considerations.md` alongside this document.
+Mandatory deliverables, one document each — `docs/architecture.md`,
+`docs/design-decisions.md`, `docs/technologies.md`. Each is a summary; the
+reasoning behind every choice stays in `docs/considerations.md`.
 
 An AI assistant must be used during implementation, and all prompts and relevant
 interaction traces must be included. `scripts/export_chat_log.py` +

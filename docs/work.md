@@ -13,9 +13,9 @@
 - ~~Add a project description for AI~~
 
 ## Backend
-- Bound the query embedder with a semaphore — it runs off the event loop, but nothing caps how many concurrent requests can be embedding at once, and each one is CPU-bound
 
 --- Done ---
+- ~~Bound the query embedder with a semaphore~~ — **won't do**: embedding is ~1% of a request, the shared thread pool already caps it at 40, and rate limits bind far sooner
 - ~~Document any additional security considerations~~ — `docs/considerations.md` → Security: secrets via `.env`, ingestion's absent inbound surface (no path argument, read-only corpus) and its new *outbound* egress since figure description, and why the page token is a demonstration rather than authentication
 - ~~Produce a latency breakdown to present, not just pass/fail against 5s~~ — `scripts/eval_golden.py` joins each answer to the api's own per-stage timings on `X-Request-ID` and reports median/p95/max per stage, in the console and the Markdown report. Answered requests only: a refusal never reaches retrieval or generation. Degrades to nothing when the log is absent (DEBUG-only, and a remote `--base-url` has no local log)
 - ~~Create b-e with Python (FastAPI)~~
@@ -95,10 +95,14 @@
 - ~~Add a DOCX figure to the corpus~~ — no DOCX carried an image, so the format's description path was untestable; `accessory-catalogue-en.docx` now has a captioned figure and `troubleshooting-zeitplan-de.docx` an uncaptioned one
 
 ## RAG — Store
-- Raise `retrieval_top_k` 5 → 10 — `qb-014` and `qb-015` each need three documents and the top 5 held duplicates, so a branch was dropped. Prefetch is already 20, so only the cut changes; cheaper than neighbour expansion for the same effect. Re-run both sets after, checking set 0 holds at 21/21
-- Watch `qa-001` for table row precision — it answered from the row above the right one on two runs ("no restocking fee" where the next row says 15%), then answered correctly on the third with identical retrieval. Intermittent, not settled: if it recurs, the fix is keeping table rows addressable through chunking
+- Watch the refusal rate across runs — Known issues #11
 
 --- Done ---
+- ~~Re-run both golden sets~~ — k=10 and markdown tables verified end to end: **answerable 42/42** (both previously-failing `conditional` questions now correct), corpus 45/46, recall@10 41/42, MRR 0.826, latency p95 4.97 s. `qa-001` no longer reads the neighbouring row
+- ~~The eval harness outlived its page token~~ — one token was minted per run and `JWT_TTL_SECONDS` is 1800, so a full two-set run 401'd at question 42 of 51 and lost every result, reports included. `PageToken` now re-mints and retries once on a 401
+- ~~`delete_stale` judges staleness on the chunk count too~~ — it filtered on the content hash alone, so re-chunking a byte-identical file stranded the tail: the markdown table change cost 7 orphan points across three documents, cleaned up by hand. Now `doc_id` AND (hash differs OR `chunk_index >= chunk_count`). `must` + `should` verified against the real server, not just embedded Qdrant
+- ~~`retrieval_top_k` 5 → 10~~ — prefetch was already 20, so the candidates existed and only the cut changed. `qb-014` and `qb-015` each need three documents and the top 5 held duplicates, dropping a branch. Cheaper than neighbour expansion for the same effect
+- ~~Tables serialised as markdown, not triplets~~ (`ingestion/chunk.py`) — Docling's default writes one `<row key>, <column> = <value>` clause per cell into a run-on paragraph keyed on the first column, so rows differing only in a later column sit adjacent and indistinguishable — the qa-001 failure. Markdown keeps one row per line under named columns and is *cheaper*: 325 tokens against 454 on the returns table. `MarkdownTableSerializer` also implements `get_header_and_body_lines`, so an oversized table still splits row-wise with its header repeated. Corpus re-ingested: 208 → 201 chunks
 - ~~Use Qdrant's embedded mode in unit tests~~ — `:memory:` throughout the collection, index and retriever tests, so real retrieval is exercised without Docker. Payload indexes are the one thing it ignores, so that assertion checks the call and was verified against the real server
 - ~~Chunk with `HybridChunker`~~ (`ingestion/chunk.py`) — BGE-M3's own tokenizer at `max_tokens=512`, table header repeated on overflow, peers merged. The tokenizer must be the embedder's: a chunk sized in someone else's tokens overflows silently at embed time
 - ~~Embed `contextualize()` output, keep the raw text separately~~ — `embed_text` carries the heading path so a chunk is findable by its section; `text` is what reaches the LLM and the citation, since heading breadcrumbs in the prompt end up in the answer
@@ -125,13 +129,10 @@
 - ~~Process each document end to end~~ (`runner.ingest_document`) — parse → chunk → embed → index, one document at a time. `parse_all`/`chunk_all` removed: holding every parsed document and embedding in memory grows with the corpus for no benefit. A failure at any stage costs one document, and the ERROR names the doc_id *and* the stage, so it can be marked for retry or editing
 
 ## RAG — Generate
-- Enable citations on the generation call; fall back to a canned reply when a response carries none (TODO in `api/rag/llm.py`)
-- Assert `cache_read_input_tokens > 0` in a test — still blocked: Haiku 4.5's
-  prompt-cache minimum is 4096 tokens and a real request now measures ~2 900
-  input tokens for generation, so the prefix is still short of it. Neighbour
-  expansion may push it over
 
 --- Done ---
+- ~~Assert `cache_read_input_tokens > 0` in a test~~ — **won't do**: the only prefix shared between requests is the ~264-token system prompt, far under Haiku's 4096 minimum, and no `cache_control` is set. Nothing planned changes that — documents and question are per-request
+- ~~Enable citations on the generation call~~ — **won't do**, out of scope. Answers carry no provenance; the system prompt tells the model not to mention the reference documents. `RetrievedChunk.citation()` remains, used for logs only
 - ~~Implement prompt guardrails on user input~~ (`api/rag/guardrails.py`):
     - ~~Protection against prompt injection~~ — sanitising always applied; detection logged, never blocking
     - ~~Clear system instructions and role separation~~
@@ -143,11 +144,11 @@
 - ~~Stop the classifier inventing refusal categories~~ — it refused a benign shipping question as `category=unclear_scope`; the prompt now names the four as a closed set and marks unclear or undocumented questions safe
 
 ## Ops / Packaging
-- **Revisit the Docker approach as a whole.** Open points: nothing asserts the baked models are present, so a base-image change could silently reintroduce a runtime download; both images are slow to build (~8 min ingest, ~8 min api) which hurts iteration; and the api carries BGE-M3 only because there is no embedder service — see `docs/considerations.md`
-- Split the dev-only bits (source mount, `--reload`) into an environment overlay when there is more than one environment. `--reload` also makes the api load BGE-M3 twice
 - Package the whole project as a single zip for delivery
 
 --- Done ---
+- ~~Revisit the Docker approach as a whole~~ — **won't do**, accepted as Known issues #4: the setup is development-shaped by choice. The open points stand as the rework list — nothing asserts the baked models are present, both images build in ~8 min, and the api carries BGE-M3 only because there is no embedder service
+- ~~Split the dev-only bits (source mount, `--reload`) into an environment overlay~~ — **won't do** while there is one environment; same acceptance as above. `--reload` also makes the api load BGE-M3 twice
 - ~~Connect to Qdrant at api startup and fail fast if unreachable~~ (`common/vector_store.py`) — verified in the container: `qdrant connected url=http://qdrant:6333`
 - ~~Add the **ingest** image~~ (`Dockerfile.ingester`) — docling and torch present there and absent from the api, `/corpus` mounted read-only with all 20 documents visible
 - ~~`docker-compose.yml` with qdrant, no load balancer~~ — api + qdrant up and healthy, qdrant storage on a named volume
@@ -158,11 +159,11 @@
 - ~~Verify `docker compose up` gives a working app with no manual DB setup~~ — re-verified with real retrieval: a German question about error code F250 returned the right answer from `fehlercode-referenz-de.pdf` with page numbers, correlated to the container by request id
 
 ## Testing
-- Warm the embedder before the retrieval pass — BGE-M3 loads lazily inside the first `retrieve()`, so question one reports seconds instead of milliseconds. The median is unaffected; the per-question table is misleading
-- Single-prompt latency tests asserting completion under 5s — the harness reports median/slowest but asserts nothing
-- Lightweight concurrent-users test showing no unacceptable degradation
 
 --- Done ---
+- ~~Lightweight concurrent-users test showing no unacceptable degradation~~ — **won't do**: single-request latency is measured and within budget, and concurrency is bounded by the Anthropic rate limit rather than by anything in this codebase
+- ~~Warm the embedder before the retrieval pass~~ — `measure_retrieval` loads BGE-M3 up front (~8 s) instead of inside the first `retrieve()`, which charged `qa-001` 5.9 s against a 0.18 s median and made the per-question table a lie. The api already warmed at startup; the harness runs in its own process
+- ~~Single-prompt latency tests asserting completion under 5s~~ — **won't do**: the harness already reports median and slowest per run, plus per-stage median/p95/max. Good enough; an assertion would only pick a threshold to argue about
 - ~~Decide: how to demonstrate/measure answer accuracy~~ — the golden set graded by an LLM judge, scored as two figures: the ingested corpus, and the not-yet-ingested batch that must be declined
 - ~~Build the eval harness~~ (`scripts/eval_golden.py`) — 26 questions against a running api, non-zero exit on any failure. **21/21** on the corpus and **3/5** declining the later batch, with recall@5 **18/18** and MRR **0.931**; findings in `docs/considerations.md` → Improvements. Answer latency median 2.9 s, slowest 5.3 s. The `3/5` is correct behaviour, not a gap: `qa-101` and `qa-105` answer from documents that are in the ingested corpus, and become expected-answer questions once `docs-later` is ingested
 - ~~Judge on `claude-opus-5`, not the app's Haiku~~ — Haiku graded three correct answers wrong in one run (accurate extra detail, and a well-formed decline — both allowed by the rubrics), moving the score 21/21 → 18/21 with no change to the system under test. 26 calls per eval, so cost is not a reason to downgrade it
@@ -173,29 +174,23 @@
 - ~~Unit tests for the mocked RAG functions and API tests for `POST /api/chat`~~
 
 ## Deferred (only if time allows)
-- **Neighbour expansion** — retrieve the chunk, send it plus adjacent siblings. Deferred until the eval harness produces answers that are wrong *because a chunk was a fragment*: retrieval already finds the right document 18/18, so expansion currently has no failure to fix, and it would triple the context tokens to buy that. Trigger is measured failure, not preference. When it lands: neighbour ids are computable from `uuid5(doc_id, chunk_index)`, so it is a keyed `retrieve()` rather than a filtered scan; merge overlapping windows and clamp to `parent_id`. `point_id()` has to move out of `ingestion/index.py` first — that module imports docling, which must not reach the api
-- **Re-ranking** — now has a measured trigger: `qa-101` assembled a retention policy out of error-code rows that merely shared its vocabulary. Nothing checks that a retrieved chunk answers the question rather than resembling it
-- Multi-turn eval cases
-- Conflict/recency test in the corpus: a document superseding an earlier one with different numbers, plus golden questions on which version applies
-- Add 10 more large files > 15 pages to the corpus
-- Add a SQL DB to store sessions -> improve the security and also can track the usage data to create dashboards
-- Rate limiting on `/api/chat` — a refused message is kept out of the history, so an attacker retries from a clean conversation with no accumulating penalty
-
-**Tooling not set up yet** — none of it changes behaviour, which is why it lost to features on a timed PoC:
-- **Linting and formatting** (ruff). The `# noqa: E402` comments on the deliberately-late imports are already written but inert until a linter exists
-- **Type checking** (mypy or pyright) — the codebase is annotated throughout, so this is mostly configuration
-- **Pre-commit hooks** to run the fast suite plus the above, instead of relying on remembering
-- **CI** — run the fast suite, the ingest suite, and a docling-marked run on a schedule rather than per commit given it needs the models
-- **Coverage reporting**, to find the untested branches rather than guess at them
-- **Dependency pinning audit** — `uv.lock` covers Python, but the Qdrant image tag and the base images are pinned by hand
-
-## Docs
-- Add diagram as code and use it to generate diagrams. One or more diagrams to handle overall arch, rag pipeline, detalied parts of the app
-- Try swagger or another way of docing the API
-- Architecture overview
-- Key design decisions and trade-offs
-- Chosen models, tools, and technologies
 
 --- Done ---
+- ~~Neighbour expansion~~ — **won't do**, Known issues #7: it needs an answer that is wrong *because a chunk was a fragment*, and `retrieval_top_k` 10 covers the cheap end of that. When it lands, `point_id()` has to leave `ingestion/index.py` first — that module imports docling, which must not reach the api
+- ~~Rate limiting on `/api/chat`~~ — **won't do**, Known issues #8: the real fix is user authentication and a per-user limit, not a limiter on a public endpoint
+- ~~Tooling: ruff, mypy, pre-commit, CI, coverage, dependency pinning audit~~ — **won't do**, Known issues #9: consistency and collaboration rather than working software. The `# noqa: E402` comments on the deliberately-late imports are already written but inert until a linter exists
+- ~~Re-ranking~~ — **won't do here**, but no longer for want of evidence: over-answering (Known issues #10) is the trigger, and #3 carries the full argument — five relevant chunks beat ten with misses, cost moves to re-rank compute, which argues for splitting model inference into its own service and reclaiming latency from the query-rewrite call. Out of scope for a timed PoC, not unjustified
+- ~~Multi-turn eval cases~~ — **won't do**, Known issues #6: needs an agentic harness and tool development, and the corpus is not large enough to invite questions that reference earlier answers
+- ~~Add a SQL DB to store sessions~~ — **won't do**, Known issues #5. Accepted consequence: no server-side sessions, and no usage data to analyse
+- ~~Conflict/recency test in the corpus~~ — **won't do**, Known issues #1: the corpus is synthetic, and adding contradictions to it tests the generator against invented conflicts rather than real ones
+- ~~Add 10 more large files > 15 pages to the corpus~~ — **won't do**, Known issues #1/#2: more synthetic documents grow the set without addressing what makes it weak
+
+## Docs
+
+--- Done ---
+- ~~Try swagger or another way of docing the API~~ — FastAPI already serves `/docs`, `/redoc` and `/openapi.json`. Made them usable: the page token is a declared `HTTPBearer` scheme so `/docs` has an Authorize button, and `/api/chat` documents its 401, its `text/plain` stream and both response headers. UI assets load from a CDN — not self-hosted, so `/docs` needs internet
+- ~~Architecture overview~~ (`docs/architecture.md`) — deployment units, code layout, both pipelines, state
+- ~~Key design decisions and trade-offs~~ (`docs/design-decisions.md`) — one line each, grouped by area, with the trade-off named
+- ~~Chosen models, tools, and technologies~~ (`docs/technologies.md`) — models, runtime versions, tooling, commands
 - ~~Track prompts used during development~~ (`scripts/export_chat_log.py`)
 - ~~Note the AI trace capture is Claude-Code-only~~ (`docs/considerations.md`)

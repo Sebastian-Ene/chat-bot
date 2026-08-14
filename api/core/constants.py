@@ -43,6 +43,9 @@ ERROR_REPLY = "Sorry — I could not reach the assistant just now. Please try ag
 # session.
 OUTCOME_HEADER = "X-Chat-Outcome"
 
+# Ties a reply to its log lines: every stage logs under this id.
+REQUEST_ID_HEADER = "X-Request-ID"
+
 # Signing algorithm for the page token. See `api/core/security.py` — this is a
 # demonstration of the mechanism, not authentication.
 JWT_ALGORITHM = "HS256"

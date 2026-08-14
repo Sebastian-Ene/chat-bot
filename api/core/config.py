@@ -23,7 +23,7 @@ class ApiSettings(Settings):
     # deliberately wider than top_k: RRF can only rank what the branches
     # surfaced, so a chunk missing from every branch's shortlist is unreachable.
     retrieval_prefetch_limit: int = 20
-    retrieval_top_k: int = 5
+    retrieval_top_k: int = 10
 
     # Extra retrieval branches from the rewrite. Both are unproven — switch them
     # off to A/B against the eval harness once a corpus exists.

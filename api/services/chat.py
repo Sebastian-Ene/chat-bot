@@ -10,6 +10,7 @@ from fastapi.responses import PlainTextResponse, StreamingResponse
 from api.core.constants import (
     OUTCOME_HEADER,
     REFUSAL_REPLY,
+    REQUEST_ID_HEADER,
     UNAVAILABLE_REPLY,
 )
 from api.core.schemas import ChatRequest
@@ -53,7 +54,7 @@ def _headers(request_id: str, outcome: str) -> dict[str, str]:
     # Note `answered` is sent before the reply is generated — headers go out
     # before the stream is iterated, so a generation that fails part-way still
     # carries this header. The logs record `generation_failed` for that case.
-    return {"X-Request-ID": request_id, OUTCOME_HEADER: outcome}
+    return {REQUEST_ID_HEADER: request_id, OUTCOME_HEADER: outcome}
 
 
 def _log_completion(outcome: str, query: str, turns: int, timings, chunks: int = 0) -> None:
@@ -96,9 +97,8 @@ async def _stream_answer(
         truncate(" | ".join(chunk.text for chunk in chunks)),
     )
 
-    # TODO(citations): pass the chunks as document blocks instead of flattening
-    # to text, so Claude's native citations resolve to a chunk rather than a
-    # number the model wrote itself. See docs/work.md, RAG — Generate.
+    # Flattened to text deliberately: citations are out of scope, so the chunks
+    # do not need to be document blocks. Provenance still reaches the log above.
     context = [chunk.text for chunk in chunks]
 
     # `stream_completion` swallows API errors and yields an apology into the

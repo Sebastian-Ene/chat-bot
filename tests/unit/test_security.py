@@ -3,9 +3,10 @@ from datetime import UTC, datetime, timedelta
 import jwt
 import pytest
 from fastapi import HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials
 
 from api.core.constants import JWT_ALGORITHM
-from api.core.security import issue_token, verify_token
+from api.core.security import bearer_scheme, issue_token, verify_token
 from api.core.config import get_settings
 
 
@@ -14,8 +15,18 @@ def _request(headers: dict[str, str] | None = None) -> Request:
     return Request({"type": "http", "method": "POST", "path": "/api/chat", "headers": raw})
 
 
-def _bearer(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
+def _bearer(token: str) -> HTTPAuthorizationCredentials:
+    """What `bearer_scheme` hands the dependency once the header has parsed."""
+    return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+
+async def _check_header(headers: dict[str, str] | None = None) -> None:
+    """The real chain: the security scheme parses, then the dependency verifies.
+
+    Header shape is `HTTPBearer`'s job since it became a declared scheme, so
+    these go through it rather than calling `verify_token` with a raw request.
+    """
+    verify_token(await bearer_scheme(_request(headers)))
 
 
 def _encode(payload: dict, secret: str | None = None) -> str:
@@ -24,7 +35,7 @@ def _encode(payload: dict, secret: str | None = None) -> str:
 
 
 def test_issued_token_verifies() -> None:
-    verify_token(_request(_bearer(issue_token())))
+    verify_token(_bearer(issue_token()))
 
 
 def test_issued_token_carries_issued_at_and_expiry() -> None:
@@ -40,7 +51,7 @@ def test_expired_token_is_rejected() -> None:
     token = _encode({"iat": expired - timedelta(seconds=300), "exp": expired})
 
     with pytest.raises(HTTPException) as error:
-        verify_token(_request(_bearer(token)))
+        verify_token(_bearer(token))
 
     assert error.value.status_code == 401
 
@@ -53,7 +64,7 @@ def test_token_signed_with_another_secret_is_rejected() -> None:
     )
 
     with pytest.raises(HTTPException) as error:
-        verify_token(_request(_bearer(token)))
+        verify_token(_bearer(token))
 
     assert error.value.status_code == 401
 
@@ -63,7 +74,7 @@ def test_tampered_token_is_rejected() -> None:
     tampered = token[:-2] + ("aa" if not token.endswith("aa") else "bb")
 
     with pytest.raises(HTTPException) as error:
-        verify_token(_request(_bearer(tampered)))
+        verify_token(_bearer(tampered))
 
     assert error.value.status_code == 401
 
@@ -78,20 +89,25 @@ def test_tampered_token_is_rejected() -> None:
         pytest.param({"Authorization": "Basic abc123"}, id="wrong scheme"),
     ],
 )
-def test_missing_or_malformed_header_is_rejected(headers: dict[str, str]) -> None:
+@pytest.mark.anyio
+async def test_missing_or_malformed_header_is_rejected(headers: dict[str, str]) -> None:
+    """Still a 401, not `HTTPBearer`'s own 403 — `auto_error` is off so this
+    module keeps its answer and its `WWW-Authenticate` header."""
     with pytest.raises(HTTPException) as error:
-        verify_token(_request(headers))
+        await _check_header(headers)
 
     assert error.value.status_code == 401
 
 
-def test_bearer_scheme_is_case_insensitive() -> None:
-    verify_token(_request({"Authorization": f"bearer {issue_token()}"}))
+@pytest.mark.anyio
+async def test_bearer_scheme_is_case_insensitive() -> None:
+    await _check_header({"Authorization": f"bearer {issue_token()}"})
 
 
-def test_rejection_does_not_leak_the_reason_to_the_client() -> None:
+@pytest.mark.anyio
+async def test_rejection_does_not_leak_the_reason_to_the_client() -> None:
     with pytest.raises(HTTPException) as error:
-        verify_token(_request())
+        await _check_header()
 
     assert error.value.detail == "invalid or expired token"
     assert error.value.headers["WWW-Authenticate"] == "Bearer"

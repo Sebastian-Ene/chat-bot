@@ -93,7 +93,7 @@ class RetrievedChunk:
         )
 
     def citation(self) -> str:
-        """Human-readable provenance, for logs and the eventual citation UI."""
+        """Human-readable provenance, for the logs. Answers carry no citations."""
         pages = (
             f" p.{','.join(str(page) for page in self.page_numbers)}"
             if self.page_numbers

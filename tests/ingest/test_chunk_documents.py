@@ -42,6 +42,16 @@ def html_chunks():
 
 
 @pytest.fixture(scope="module")
+def returns_table_chunk():
+    """The chunk holding the returns table — a DOCX table whose rows differ only
+    in their later columns."""
+    chunks = chunks_for("aurora-warranty-returns-shipping-en.docx")
+    matches = [c for c in chunks if "Restocking fee" in c.text]
+    assert len(matches) == 1, "expected the returns table in exactly one chunk"
+    return matches[0]
+
+
+@pytest.fixture(scope="module")
 def dense_table_chunks():
     """The error-code reference: 25 pages of tables, chunks sitting on the
     budget, and a heading on every one — where contextualisation overflows."""
@@ -113,6 +123,40 @@ class TestContextualisationOverflow:
             tokenizer.count_tokens(c.embed_text) < MODEL_MAX_TOKENS
             for c in dense_table_chunks
         )
+
+
+class TestTableSerialisation:
+    """Tables go in as markdown, not Docling's default triplet form.
+
+    The triplet form writes one `<row key>, <column> = <value>` clause per cell
+    into a single run-on paragraph, keyed on the first column only. Two rows
+    differing in a later column then read almost identically and sit adjacent,
+    and generation answers from the wrong one.
+    """
+
+    def test_table_rows_are_markdown_lines(self, returns_table_chunk) -> None:
+        rows = [
+            line
+            for line in returns_table_chunk.text.splitlines()
+            if line.startswith("|")
+        ]
+
+        assert len(rows) == 9, "header, separator and seven data rows"
+
+    def test_rows_differing_late_stay_separable(self, returns_table_chunk) -> None:
+        """The qa-001 case: two Business rows share every earlier column and
+        differ in condition and fee. Each must be its own line."""
+        business = [
+            line
+            for line in returns_table_chunk.text.splitlines()
+            if line.startswith("| Business")
+        ]
+
+        assert len(business) == 3
+        assert sum("15%" in line for line in business) == 1
+
+    def test_no_triplet_serialisation(self, returns_table_chunk) -> None:
+        assert "**Restocking fee** = " not in returns_table_chunk.text
 
 
 class TestHtml:

@@ -11,6 +11,12 @@ as belonging to *Troubleshooting → Hub offline*. `text` is the raw chunk, whic
 is what reaches the LLM and the citation — putting synthetic heading
 breadcrumbs into the prompt would put them into the answer.
 
+Tables are serialised as **markdown**, replacing Docling's default triplet form
+(`<row key>, <column> = <value>` per cell, run together into one paragraph).
+Markdown keeps rows on their own lines under named columns, so two rows that
+differ only in a later column stay distinguishable — and it is *cheaper*, since
+the triplet form repeats the row key and column name for every single cell.
+
 Note the budget applies to the **raw** chunk: Docling sizes a chunk on its own
 serialisation and only then prepends the heading path, so `embed_text` can run
 past `chunk_max_tokens` by the length of that path. On this corpus 27 of 207
@@ -27,9 +33,17 @@ from functools import lru_cache
 # needs a C compiler. Must be set before torch is imported anywhere.
 os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
+from docling_core.transforms.chunker.hierarchical_chunker import (  # noqa: E402
+    ChunkingDocSerializer,
+    ChunkingSerializerProvider,
+)
 from docling_core.transforms.chunker.hybrid_chunker import HybridChunker  # noqa: E402
 from docling_core.transforms.chunker.tokenizer.huggingface import (  # noqa: E402
     HuggingFaceTokenizer,
+)
+from docling_core.transforms.serializer.base import BaseTableSerializer  # noqa: E402
+from docling_core.transforms.serializer.markdown import (  # noqa: E402
+    MarkdownTableSerializer,
 )
 
 from ingestion.config import get_settings  # noqa: E402
@@ -68,6 +82,27 @@ def _parent_id(doc_id: str, headings: list[str]) -> str:
     return f"{doc_id}#{' > '.join(headings)}"
 
 
+class _MarkdownTableDocSerializer(ChunkingDocSerializer):
+    """Chunking serializer that writes tables as markdown, not triplets.
+
+    Docling's default `TripletTableSerializer` flattens a table to one
+    `<row key>, <column> = <value>` clause per cell, joined with ". " into a
+    single run-on paragraph. Rows then have no boundary and are keyed only by
+    the *first* column, so two rows that differ in a later column read almost
+    identically and sit adjacent — the model answers from the wrong one.
+
+    The annotation is required: pydantic rejects overriding a base-class field
+    with a bare assignment.
+    """
+
+    table_serializer: BaseTableSerializer = MarkdownTableSerializer()
+
+
+class _MarkdownTableSerializerProvider(ChunkingSerializerProvider):
+    def get_serializer(self, doc) -> ChunkingDocSerializer:
+        return _MarkdownTableDocSerializer(doc=doc)
+
+
 @lru_cache(maxsize=1)
 def get_chunker() -> HybridChunker:
     """Built once per process — it loads a tokenizer."""
@@ -82,8 +117,12 @@ def get_chunker() -> HybridChunker:
         settings.chunk_max_tokens,
     )
     # repeat_table_header and merge_peers are on by default: a table split across
-    # chunks keeps its header row, and undersized neighbours are merged.
-    return HybridChunker(tokenizer=tokenizer)
+    # chunks keeps its header row, and undersized neighbours are merged. The
+    # markdown serializer implements `get_header_and_body_lines`, so the repeated
+    # header is a real header plus separator row rather than a bare first line.
+    return HybridChunker(
+        tokenizer=tokenizer, serializer_provider=_MarkdownTableSerializerProvider()
+    )
 
 
 def _page_numbers(doc_chunk) -> list[int]:

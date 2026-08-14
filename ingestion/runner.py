@@ -101,7 +101,7 @@ def ingest_document(client: QdrantClient, document: DiscoveredDocument) -> int:
         written = index_document(client, chunks, embeddings)
 
         stage = "delete_stale"
-        delete_stale(client, document.doc_id, document.content_hash)
+        delete_stale(client, document.doc_id, document.content_hash, len(chunks))
     except Exception as error:
         raise DocumentFailed(
             f"{document.doc_id}: {stage}: {type(error).__name__}: {error}"
