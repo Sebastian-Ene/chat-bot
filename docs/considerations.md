@@ -861,6 +861,25 @@ line each, heading tagged `fixed` / `open`:
 - **Left** — an LLM judge is still a measurement instrument with its own error.
   Read the reasons on any verdict that surprises you before believing the score.
 
+### Conditional answers lose a branch at k=5 — open
+
+- **Broke** — `qb-014` (free-shipping thresholds) and `qb-015` (consumer return
+  window) each answered from one branch only, giving the general policy and
+  dropping the regional exceptions. The two `conditional` misses were the only
+  retrieval failures in set 1 (`conditional 1/3`).
+- **Why** — not ranking: coverage. Both answers span three documents, and the
+  top 5 held duplicates — the UK addendum twice, the general policy twice —
+  leaving three effective slots for three required documents.
+- **Fix** — raise `retrieval_top_k` from 5 to 10. `retrieval_prefetch_limit` is
+  already 20, so the candidates exist and only the cut changes. Chosen over
+  neighbour expansion, which is the same fix by a longer road: keyed sibling
+  lookups, window merging, clamping to `parent_id`, and moving `point_id()` out
+  of `ingestion/index.py` first. Doubling k is one setting.
+- **Left** — costs context tokens on every request (median input is ~2 100
+  today, so there is headroom) and may move the latency tail. Re-run both sets
+  after changing it: the number to watch is whether set 0 holds at 21/21 while
+  `conditional` improves.
+
 ### Answer assembled from unrelated rows — open
 
 - **Broke** — `qa-101`: a retention policy stated as fact, built from error-code

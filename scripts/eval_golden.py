@@ -105,6 +105,26 @@ specific fact or figure as though it were documented — that fabrication is the
 failure this question exists to catch."""
 
 
+def load_golden(which: str) -> list[dict]:
+    """Questions from one golden set or both.
+
+    Set 0 asks where a fact lives; set 1 asks what to do with it once retrieved
+    (enumeration, derivation, exclusion). Ids do not collide — `qa-*` and `qb-*`
+    — so the merged run needs no disambiguation, and every report groups by the
+    `type` field regardless of which file a question came from.
+    """
+    names = {"0": ["golden_qa_0.json"], "1": ["golden_qa_1.json"]}.get(
+        which, ["golden_qa_0.json", "golden_qa_1.json"]
+    )
+    items: list[dict] = []
+    for name in names:
+        path = paths.CORPUS / name
+        if not path.is_file():
+            sys.exit(f"no golden set at {path} — run `python -m scripts.generate_corpus`")
+        items += json.loads(path.read_text(encoding="utf-8"))
+    return items
+
+
 def must_decline(item: dict) -> bool:
     """`later` documents are not in the ingestion root, so answering is invention."""
     return item["type"] == "unanswerable" or item["batch"] == "later"
@@ -251,29 +271,57 @@ def write_markdown(
     ]
 
     if results:
-        def tally(predicate) -> str:
-            rows = [r for r in results if predicate(r)]
+        def score(rows: list[dict]) -> str:
             return f"{sum(r['verdict'] == 'correct' for r in rows)}/{len(rows)}"
 
-        answerable = [r for r in results if not r["must_decline"] and r["batch"] == "initial"]
-        unanswerable = [r for r in results if r["type"] == "unanswerable"]
-        corpus = answerable + unanswerable
+        # Rows are the question type — what is actually being tested. Whether a
+        # type expects an answer or a decline is a property of it, not a way to
+        # group it.
+        corpus = [r for r in results if r["batch"] == "initial"]
+        by_type: dict[str, list[dict]] = {}
+        for row in corpus:
+            by_type.setdefault(row["type"], []).append(row)
         seconds = sorted(r["seconds"] for r in results)
 
         out += [
             "",
             "## Answer correctness",
             "",
-            "| group | score | expectation |",
+            "| type | expects | score |",
             "| --- | --- | --- |",
-            f"| answerable | {tally(lambda r: r in answerable)} | matches the reference |",
-            f"| unanswerable | {tally(lambda r: r in unanswerable)} | declines |",
-            f"| **corpus total** | **{tally(lambda r: r in corpus)}** | |",
-            f"| not yet ingested | {tally(lambda r: r['batch'] == 'later')} | declines — `docs-later` |",
+        ]
+        out += [
+            f"| {kind} | {'decline' if by_type[kind][0]['must_decline'] else 'answer'} "
+            f"| {score(by_type[kind])} |"
+            for kind in sorted(by_type)
+        ]
+        out += [
+            f"| **corpus total** | | **{score(corpus)}** |",
             "",
             f"Latency: median {seconds[len(seconds) // 2]:.1f}s, slowest {seconds[-1]:.1f}s",
             "",
         ]
+
+        # Reported apart from the score, and named for what it is: these ask
+        # about documents that are not in the ingestion root, so a decline is
+        # the only correct answer *today*. They become ordinary answerable
+        # questions once `docs-later` is ingested — a bare fraction alongside
+        # the corpus score reads as a failure rather than a pending state.
+        if later := [r for r in results if r["batch"] == "later"]:
+            answered = [r for r in later if r["verdict"] != "correct"]
+            line = (
+                f"**Not yet ingested** — {len(later) - len(answered)} of {len(later)} "
+                "`docs-later` questions declined, as they must until those documents "
+                "are ingested."
+            )
+            if answered:
+                line += (
+                    " Answered instead: "
+                    + ", ".join(f"`{r['id']}`" for r in answered)
+                    + " — check the detail below for whether the fact came from the "
+                    "ingested corpus (partial coverage) or was invented."
+                )
+            out += [line, ""]
 
         if rows := latency_rows(results, perf):
             out += [
@@ -539,6 +587,11 @@ def main(argv: list[str] | None = None) -> int:
         help=f"where to write the readable report (default: {DEFAULT_MARKDOWN})",
     )
     parser.add_argument(
+        "--golden",
+        default="all",
+        help="which golden set: 0, 1, or all (default: all)",
+    )
+    parser.add_argument(
         "--performance-log",
         type=Path,
         default=DEFAULT_PERF_LOG,
@@ -558,7 +611,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     settings = configure(ApiSettings())
-    items = json.loads((paths.CORPUS / "golden_qa.json").read_text(encoding="utf-8"))
+    items = load_golden(args.golden)
     results: list[dict] = []
     retrieval: list[dict] = []
 

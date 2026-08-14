@@ -95,6 +95,7 @@
 - ~~Add a DOCX figure to the corpus~~ — no DOCX carried an image, so the format's description path was untestable; `accessory-catalogue-en.docx` now has a captioned figure and `troubleshooting-zeitplan-de.docx` an uncaptioned one
 
 ## RAG — Store
+- Raise `retrieval_top_k` 5 → 10 — `qb-014` and `qb-015` each need three documents and the top 5 held duplicates, so a branch was dropped. Prefetch is already 20, so only the cut changes; cheaper than neighbour expansion for the same effect. Re-run both sets after, checking set 0 holds at 21/21
 - Watch `qa-001` for table row precision — it answered from the row above the right one on two runs ("no restocking fee" where the next row says 15%), then answered correctly on the third with identical retrieval. Intermittent, not settled: if it recurs, the fix is keeping table rows addressable through chunking
 
 --- Done ---

@@ -25,7 +25,14 @@ def _documents_referenced(entry: dict) -> list[str]:
 
 def main() -> int:
     problems: list[str] = []
-    qa = json.loads((paths.CORPUS / "golden_qa.json").read_text(encoding="utf-8"))
+    # Both sets: they reference the same documents, and a broken reference in
+    # either one invalidates the eval it feeds.
+    qa = [
+        entry
+        for name in ("golden_qa_0.json", "golden_qa_1.json")
+        if (paths.CORPUS / name).is_file()
+        for entry in json.loads((paths.CORPUS / name).read_text(encoding="utf-8"))
+    ]
     # Walk the tree: documents are spread across coverage/, bulk/ and later/,
     # which is the shape the ingester has to handle too.
     documents = {

@@ -21,6 +21,7 @@ from scripts.corpus import (
     doc5_faq,
     error_codes,
     golden_qa,
+    golden_qa_1,
     images,
     markdown_kit,
     paths,
@@ -62,12 +63,20 @@ def main() -> None:
                 f"{path.stat().st_size / 1024:7.1f} KB"
             )
 
-    qa_path = golden_qa.write(paths.CORPUS / "golden_qa.json")
+    # Two sets, numbered rather than named: `_0` asks where a fact lives, `_1`
+    # asks what to do with it once retrieved. Kept apart so a score can be read
+    # per set — mixing them would hide which shape a regression is in.
+    qa_path = golden_qa.write(paths.CORPUS / "golden_qa_0.json")
     print(
-        f"golden set: {qa_path} ({len(golden_qa.QA)} initial + "
+        f"golden set 0: {qa_path} ({len(golden_qa.QA)} initial + "
         f"{len(golden_qa.LATER_QA)} later)"
     )
     for kind, count in sorted(golden_qa.summary().items()):
+        print(f"  {kind:15} {count}")
+
+    qa_1_path = golden_qa_1.write(paths.CORPUS / "golden_qa_1.json")
+    print(f"golden set 1: {qa_1_path} ({len(golden_qa_1.QA)} questions)")
+    for kind, count in sorted(golden_qa_1.summary().items()):
         print(f"  {kind:15} {count}")
 
 
